@@ -8,6 +8,8 @@ App desktop che collega i modelli eseguiti sul computer dell’utente agli strum
 
 L’obiettivo successivo è permettere anche ad altri siti di dichiarare la propria compatibilità e mostrarla nell’app. Questa copia contiene il collegamento già implementato con Jase: il riconoscimento di altri siti e le relative notifiche sono ancora da sviluppare. L’app attuale non legge le schede del browser.
 
+La prima proposta del flusso e del protocollo per piattaforme indipendenti è in [docs/WEB-STANDARD.md](docs/WEB-STANDARD.md): dichiarazione del sito, scoperta, notifica, consenso e collegamento alla LLM scelta dall’utente. È una specifica di progetto, ancora da implementare.
+
 ## Cosa contiene oggi
 
 - Motore Go per Windows, macOS e Linux, su Intel/AMD e ARM.
