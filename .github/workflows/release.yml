@@ -1,0 +1,72 @@
+name: Release Jase Tunnel
+on:
+  push:
+    tags: ['v*', 'dev-v*']
+permissions:
+  contents: read
+concurrency:
+  group: jase-tunnel-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    uses: ./.github/workflows/check.yml
+  release:
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      JASE_TUNNEL_RELEASE_TAG: ${{ github.ref_name }}
+      JASE_TUNNEL_RELEASE_COMMIT: ${{ github.sha }}
+      JASE_TUNNEL_RELEASE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Prepare and verify the version tag
+        run: |
+          node scripts/verify-release.mjs --tag-only
+          npm ci
+          go mod download
+          npm test
+      - name: Build the correct release channel
+        id: build
+        run: |
+          case "$JASE_TUNNEL_RELEASE_TAG" in
+            dev-v*) npm run build:dev; directory=dist-dev ;;
+            *) npm run build; directory=dist ;;
+          esac
+          node scripts/verify-release.mjs --dir "$directory"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+      - name: Publish verified executables in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_DIRECTORY: ${{ steps.build.outputs.directory }}
+        run: |
+          draft=$(gh release view "$JASE_TUNNEL_RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null || true)
+          if [ "$draft" = false ]; then
+            echo 'This release is already public; publish a new tag instead of replacing its files.' >&2
+            exit 1
+          fi
+          mkdir -p .deploy-check
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const development=process.env.JASE_TUNNEL_RELEASE_TAG.startsWith('dev-');
+          writeFileSync('.deploy-check/release-notes.md', `Jase Tunnel per Windows, macOS e Linux.\n\n${development ? 'Versione per localhost; non destinata al sito di produzione.' : 'Versione per il sito di produzione.'}\n\nCommit: ${process.env.JASE_TUNNEL_RELEASE_COMMIT}\nBuild: ${process.env.JASE_TUNNEL_RELEASE_RUN_URL}\n\nSHA256SUMS contiene le impronte degli eseguibili.\n`);
+          JS
+          if [ "$draft" != true ]; then
+            gh release create "$JASE_TUNNEL_RELEASE_TAG" --verify-tag --target "$JASE_TUNNEL_RELEASE_COMMIT" --draft --title "Jase Tunnel $JASE_TUNNEL_RELEASE_TAG" --notes-file .deploy-check/release-notes.md
+          fi
+          gh release upload "$JASE_TUNNEL_RELEASE_TAG" "$RELEASE_DIRECTORY"/* --clobber
+          case "$JASE_TUNNEL_RELEASE_TAG" in
+            dev-v*) gh release edit "$JASE_TUNNEL_RELEASE_TAG" --draft=false --prerelease --latest=false ;;
+            *) gh release edit "$JASE_TUNNEL_RELEASE_TAG" --draft=false --prerelease=false --latest ;;
+          esac

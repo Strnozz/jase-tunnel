@@ -1,5 +1,7 @@
 # Collegamento attuale e direzione del progetto
 
+Il programma desktop viene compilato e distribuito esclusivamente da `Strnozz/jase-tunnel`. Jase conserva il modulo web di collegamento e scarica i pacchetti dalle release di questo repository; il suo deploy non include sorgenti o binari del programma.
+
 ## Interfacce desktop
 
 macOS usa AppKit, Windows le API Win32 e Linux GTK 3, caricata da `purego`. Il motore e il pannello restano nello stesso processo. Modelli, stato, contatori, filtri, dettaglio degli eventi e preferenze di debug/ragionamento sono disponibili anche sui nuovi pannelli. Tutti leggono copie dello stato prive di token o percorsi dei pesi; il registro non ha API HTTP.

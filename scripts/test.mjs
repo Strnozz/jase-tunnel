@@ -9,4 +9,7 @@ const result = spawnSync(process.env.JASE_GO ?? "go", ["test", "-race", "./..."]
   env: { ...process.env, GOTOOLCHAIN: "local", GOPROXY: "off", GOSUMDB: "off" }
 });
 if (result.error) console.error(result.error.message);
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+const release = spawnSync(process.execPath, ["--test", "scripts/verify-release.test.mjs"], { cwd: root, stdio: "inherit" });
+if (release.error) console.error(release.error.message);
+process.exit(release.status ?? 1);

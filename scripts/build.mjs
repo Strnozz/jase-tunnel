@@ -15,7 +15,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = resolve(root, option("--out") ?? (dev ? "dist-dev" : "dist")), go = process.env.JASE_GO ?? "go";
 // A Mac bundle must be signed on macOS (codesign); one built elsewhere is reported "damaged"
 // by Gatekeeper once downloaded. CI builds only on a macOS runner.
-if (process.env.GITHUB_ACTIONS === "true" && (process.platform !== "darwin" || dev)) throw new Error("Release desktop builds run on the macOS runner, without --dev");
+if (process.env.GITHUB_ACTIONS === "true" && process.platform !== "darwin") throw new Error("Desktop builds run on the macOS runner");
 if (process.platform !== "darwin") throw new Error("The macOS menu-bar app must be built on macOS with Xcode Command Line Tools.");
 const version = readFileSync(join(root, "VERSION"), "utf8").trim();
 const run = (command, arguments_, options = {}) => {
@@ -88,7 +88,7 @@ try {
     run("python3", ["-c", zip, app, join(output, "Jase-macOS.zip")]);
   }
   record("macos-universal", "Jase-macOS.zip");
-  writeFileSync(join(output, "manifest.json"), JSON.stringify({ protocol: "jase-companion-v1", version, build, commit: revision, dirty, run: process.env.JASE_DEPLOY_RUN_URL ?? "local", signing: dev ? "development-loopback" : "development", macSigned: signed, artifacts }, null, 2) + "\n");
+  writeFileSync(join(output, "manifest.json"), JSON.stringify({ protocol: "jase-companion-v1", version, build, commit: revision, dirty, run: process.env.JASE_TUNNEL_RELEASE_RUN_URL ?? "local", signing: dev ? "development-loopback" : "development", macSigned: signed, artifacts }, null, 2) + "\n");
   writeFileSync(join(output, "SHA256SUMS"), artifacts.map(a => `${a.sha256}  ${a.filename}`).join("\n") + "\n");
   console.log(`Built ${artifacts.length} downloads for Windows, macOS and Linux in ${output}`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

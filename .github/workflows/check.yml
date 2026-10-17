@@ -1,6 +1,7 @@
 name: Check Jase Tunnel
 
 on:
+  workflow_call:
   pull_request:
   workflow_dispatch:
 

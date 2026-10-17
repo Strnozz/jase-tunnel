@@ -72,7 +72,22 @@ npm run build
 
 Questa versione scrive in `dist/`. `--out <cartella>` permette un percorso differente. Il bundle macOS ha una firma ad hoc; firma Developer ID, notarizzazione Apple e firma Windows non sono configurate.
 
-Finché la cartella non ha un proprio repository Git, i pacchetti dichiarano commit `local` e includono l’impronta dei sorgenti. Dopo l’inizializzazione del repository useranno il suo commit, senza ereditare quello dell’eventuale cartella contenitore. La compilazione locale non pubblica i pacchetti.
+I pacchetti dichiarano il commit di questo repository e lo stato della compilazione. Una copia esportata senza Git dichiara `local` e l’impronta dei sorgenti. La compilazione locale non pubblica i pacchetti.
+
+## Release su GitHub
+
+Il repository pubblico degli eseguibili è [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases). I siti che integrano il tunnel scaricano da qui, senza conservare o compilare una propria copia dell’app.
+
+Il workflow `release.yml` si attiva sulla pubblicazione di un tag che corrisponde a `VERSION`:
+
+- `v0.1.0`: release stabile per il sito di produzione.
+- `dev-v0.1.0-preview1`: prerelease per localhost, compilata con `--dev`.
+
+Prima verifica il codice sui tre sistemi, poi compila i cinque pacchetti sul runner Mac. Controlla commit, run, canale, inventario e SHA-256 e carica i file in una bozza. Solo dopo il caricamento completo rende pubblica la release. Un pacchetto per localhost non viene pubblicato come stabile; una release già pubblica non viene sovrascritta dai tentativi successivi.
+
+`manifest.json` e `SHA256SUMS` vengono distribuiti insieme agli eseguibili. `JASE_TUNNEL_RELEASE_RUN_URL` collega la build alla sua esecuzione GitHub Actions. Firma ad hoc e restrizioni attuali delle origini restano quelle descritte sopra.
+
+Il sito Jase conserva il modulo web per riconoscere il sistema, proporre il pulsante, associare il browser e gestire il broker. La pubblicazione dell’app ha un ciclo indipendente dal deploy del sito.
 
 ## Collegamento al sito
 
@@ -91,4 +106,4 @@ La versione ordinaria accetta `https://jaseengine.it`; `--dev` abilita anche le 
 | `.github/workflows/check.yml` | Verifiche su Windows, macOS e Linux nel futuro repository |
 | `VERSION` | Versione dell’app |
 
-Il modulo Go conserva il nome interno `jase/companion` per mantenere questa estrazione identica ai sorgenti originali. La cartella originale `companion/` nel progetto Jase resta al suo posto; le modifiche future nelle due copie non si sincronizzano automaticamente.
+Il modulo Go conserva il nome interno `jase/companion`. Questo repository è l’unica sede dei sorgenti dell’app; il progetto Jase mantiene soltanto l’integrazione web.
