@@ -1,0 +1,29 @@
+# Generated packages and local build tools
+/dist/
+/dist-dev/
+/node_modules/
+/.deploy-check/
+/.cache/
+/coverage/
+*.test
+*.exe
+*.app/
+*.dSYM/
+/companion
+/jase-tunnel
+/Jase
+
+# Private runtime state and local settings
+.env
+.env.*
+!.env.example
+*.log
+connections.json
+connections.json.tmp
+/state/
+
+# Editor and operating system files
+.DS_Store
+._*
+.vscode/
+.idea/

@@ -1,0 +1,18 @@
+{
+  "name": "jase-tunnel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jase Tunnel: collega i modelli locali agli strumenti IA del sito.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "build": "node scripts/build.mjs",
+    "build:dev": "node scripts/build.mjs --dev"
+  },
+  "devDependencies": {
+    "sharp": "0.35.5"
+  }
+}

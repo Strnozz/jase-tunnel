@@ -1,0 +1,320 @@
+//go:build darwin && cgo
+
+#import <AppKit/AppKit.h>
+
+extern void jaseDesktopQuit(void);
+extern char *jaseDesktopState(unsigned long long);
+extern void jaseDesktopAction(char *, int);
+extern void jaseDesktopImport(char *, int);
+extern void jaseDesktopImportFound(char *);
+
+// Artwork comes from the website favicon, rasterized by the package builder.
+// The app keeps its colors; the menu bar uses the favicon's white silhouette.
+static NSImage *JaseIcon(CGFloat size, BOOL menu) {
+    NSString *name=menu?@"JaseMenu":@"Jase";
+    NSImage *source=[NSImage imageNamed:name];
+    if (!source) source=[NSImage imageNamed:NSImageNameApplicationIcon];
+    NSImage *image=[[source copy] autorelease];image.size=NSMakeSize(size,size);image.template=NO;return image;
+}
+
+// Native AppKit controls throughout: no embedded browser or local UI server.
+static NSTextField *JaseLabel(NSString *text, CGFloat size, NSFontWeight weight) {
+    NSTextField *label=[NSTextField labelWithString:text];
+    label.font=[NSFont systemFontOfSize:size weight:weight];
+    label.lineBreakMode=NSLineBreakByTruncatingTail;
+    return label;
+}
+static NSStackView *JaseStack(NSArray<NSView *> *views, NSUserInterfaceLayoutOrientation orientation) {
+    NSStackView *stack=[NSStackView stackViewWithViews:views];
+    stack.orientation=orientation;stack.spacing=12;
+    stack.alignment=orientation==NSUserInterfaceLayoutOrientationVertical?NSLayoutAttributeLeading:NSLayoutAttributeCenterY;
+    return stack;
+}
+static void JasePin(NSView *child,NSView *parent,CGFloat inset) {
+    child.translatesAutoresizingMaskIntoConstraints=NO;[parent addSubview:child];
+    [NSLayoutConstraint activateConstraints:@[
+        [child.leadingAnchor constraintEqualToAnchor:parent.leadingAnchor constant:inset],
+        [child.trailingAnchor constraintEqualToAnchor:parent.trailingAnchor constant:-inset],
+        [child.topAnchor constraintEqualToAnchor:parent.topAnchor constant:inset],
+        [child.bottomAnchor constraintEqualToAnchor:parent.bottomAnchor constant:-inset]]];
+}
+static NSView *JaseSpacer(void) {
+    NSView *view=[[[NSView alloc] init] autorelease];
+    [view setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];return view;
+}
+
+@interface JaseDesktopDelegate : NSObject <NSApplicationDelegate,NSWindowDelegate,NSTableViewDataSource,NSTableViewDelegate>
+@property(retain) NSStatusItem *statusItem;
+@property(retain) NSMenuItem *addMenuItem;
+@property(retain) NSWindow *window;
+@property(retain) NSTabView *tabs;
+@property(retain) NSTextField *statusTitle;
+@property(retain) NSTextField *statusDetail;
+@property(retain) NSImageView *statusIcon;
+@property(retain) NSTextField *statistics;
+@property(retain) NSTextField *privacy;
+@property(retain) NSTextField *notice;
+@property(retain) NSTextField *version;
+@property(retain) NSButton *debugButton;
+@property(retain) NSButton *thinkingButton;
+@property(retain) NSButton *addButton;
+@property(retain) NSButton *importButton;
+@property(retain) NSProgressIndicator *progress;
+@property(retain) NSPopUpButton *filter;
+@property(retain) NSTableView *modelTable;
+@property(retain) NSTableView *logTable;
+@property(retain) NSTextView *detail;
+@property(retain) NSArray *models;
+@property(retain) NSMutableArray *events;
+@property(retain) NSArray *filteredEvents;
+@property(retain) NSTimer *timer;
+@property(retain) NSISO8601DateFormatter *dates;
+@property(retain) NSDateFormatter *clock;
+@property unsigned long long cursor;
+@property unsigned long long generation;
+@property BOOL firstState;
+@property BOOL importing;
+- (void)setupInterface;
+@end
+
+@implementation JaseDesktopDelegate
+- (NSButton *)button:(NSString *)title action:(SEL)action {
+    NSButton *button=[NSButton buttonWithTitle:title target:self action:action];button.bezelStyle=NSBezelStyleRounded;return button;
+}
+- (NSScrollView *)table:(NSTableView **)table columns:(NSArray *)columns {
+    NSTableView *view=[[[NSTableView alloc] init] autorelease];
+    view.delegate=self;view.dataSource=self;view.rowHeight=28;view.usesAlternatingRowBackgroundColors=YES;
+    view.style=NSTableViewStyleInset;view.columnAutoresizingStyle=NSTableViewLastColumnOnlyAutoresizingStyle;
+    for (NSArray *column in columns) {
+        NSTableColumn *item=[[[NSTableColumn alloc] initWithIdentifier:column[0]] autorelease];
+        item.title=column[1];item.width=[column[2] doubleValue];item.minWidth=60;[view addTableColumn:item];
+    }
+    NSScrollView *scroll=[[[NSScrollView alloc] init] autorelease];scroll.documentView=view;
+    scroll.hasVerticalScroller=YES;scroll.autohidesScrollers=YES;scroll.borderType=NSBezelBorder;
+    [scroll.heightAnchor constraintGreaterThanOrEqualToConstant:140].active=YES;
+    *table=view;return scroll;
+}
+- (NSView *)modelPane {
+    NSTextField *intro=JaseLabel(@"Modelli e pesi trovati sul computer",13,NSFontWeightSemibold);
+    NSTableView *table=nil;
+    NSScrollView *scroll=[self table:&table columns:@[@[@"name",@"Modello",@330],@[@"engine",@"Motore / formato",@130],@[@"status",@"Stato",@180]]];
+    self.modelTable=table;table.target=self;table.doubleAction=@selector(importSelected:);
+    self.addButton=[self button:@"Aggiungi pesi…" action:@selector(addWeights:)];
+    self.addButton.image=[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:nil];self.addButton.imagePosition=NSImageLeft;
+    self.importButton=[self button:@"Aggiungi selezionati" action:@selector(importSelected:)];self.importButton.enabled=NO;
+    self.progress=[[[NSProgressIndicator alloc] init] autorelease];self.progress.style=NSProgressIndicatorStyleSpinning;self.progress.controlSize=NSControlSizeSmall;self.progress.displayedWhenStopped=NO;
+    NSStackView *buttons=JaseStack(@[self.addButton,self.importButton,self.progress,JaseSpacer()],NSUserInterfaceLayoutOrientationHorizontal);
+    self.notice=[NSTextField wrappingLabelWithString:@"Apri Ollama o il server locale di LM Studio per rendere disponibili i modelli. Puoi aggiungere file GGUF o cartelle di pesi compatibili."];
+    self.notice.font=[NSFont systemFontOfSize:11];self.notice.textColor=NSColor.secondaryLabelColor;
+    NSStackView *content=JaseStack(@[intro,scroll,buttons,self.notice],NSUserInterfaceLayoutOrientationVertical);
+    NSView *pane=[[[NSView alloc] init] autorelease];JasePin(content,pane,14);
+    for(NSView *child in @[scroll,buttons,self.notice]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
+    return pane;
+}
+- (NSView *)activityPane {
+    self.statistics=JaseLabel(@"Nessuna attività",12,NSFontWeightRegular);self.statistics.textColor=NSColor.secondaryLabelColor;
+    self.filter=[[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO] autorelease];
+    for(NSArray *option in @[@[@"Tutte le attività",@"all"],@[@"Chiamate al server",@"server"],@[@"Ricezioni dal server",@"receive"],@[@"Modello e interprete",@"model"],@[@"Errori",@"error"]]) {
+        [self.filter addItemWithTitle:option[0]];self.filter.lastItem.representedObject=option[1];
+    }
+    [self.filter setAccessibilityLabel:@"Filtra registro"];self.filter.target=self;self.filter.action=@selector(filterChanged:);
+    NSStackView *toolbar=JaseStack(@[self.filter,JaseSpacer(),[self button:@"Svuota registro" action:@selector(clearLog:)]],NSUserInterfaceLayoutOrientationHorizontal);
+    NSTableView *table=nil;
+    NSScrollView *scroll=[self table:&table columns:@[@[@"time",@"Ora",@85],@[@"event",@"Attività",@535]]];self.logTable=table;
+    [table setAccessibilityLabel:@"Registro del tunnel"];
+    NSScrollView *inspector=[[[NSScrollView alloc] init] autorelease];inspector.hasVerticalScroller=YES;inspector.autohidesScrollers=YES;inspector.borderType=NSBezelBorder;
+    self.detail=[[[NSTextView alloc] initWithFrame:NSMakeRect(0,0,600,76)] autorelease];
+    self.detail.editable=NO;self.detail.selectable=YES;self.detail.font=[NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];self.detail.textColor=NSColor.labelColor;
+    self.detail.textContainerInset=NSMakeSize(8,6);self.detail.autoresizingMask=NSViewWidthSizable;self.detail.verticallyResizable=YES;self.detail.horizontallyResizable=NO;
+    self.detail.textContainer.widthTracksTextView=YES;self.detail.string=@"Seleziona un evento per leggerne i dettagli.";
+    [self.detail setAccessibilityLabel:@"Dettagli dell’evento"];inspector.documentView=self.detail;
+    [inspector.heightAnchor constraintEqualToConstant:82].active=YES;
+    NSStackView *content=JaseStack(@[self.statistics,toolbar,scroll,inspector],NSUserInterfaceLayoutOrientationVertical);
+    NSView *pane=[[[NSView alloc] init] autorelease];JasePin(content,pane,14);
+    for(NSView *child in @[toolbar,scroll,inspector]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
+    return pane;
+}
+- (void)applicationDidFinishLaunching:(NSNotification *)note {
+    [self setupInterface];
+}
+- (void)setupInterface {
+    if(self.window)return;
+    NSApp.applicationIconImage=JaseIcon(256,NO);
+    self.events=[NSMutableArray array];self.models=@[];self.filteredEvents=@[];self.firstState=YES;
+    self.dates=[[[NSISO8601DateFormatter alloc] init] autorelease];self.dates.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;
+    self.clock=[[[NSDateFormatter alloc] init] autorelease];self.clock.dateFormat=@"HH:mm:ss";
+    self.statusItem=[NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
+    self.statusItem.button.image=JaseIcon(20,YES);self.statusItem.button.toolTip=@"Jase Tunnel";
+    [self.statusItem.button setAccessibilityLabel:@"Jase Tunnel"];
+    // Both mouse buttons open the standard compact macOS menu, with three items.
+    NSMenu *menu=[[[NSMenu alloc] initWithTitle:@"Jase Tunnel"] autorelease];menu.autoenablesItems=NO;
+    NSMenuItem *open=[menu addItemWithTitle:@"Apri Jase Tunnel" action:@selector(showPanel:) keyEquivalent:@""];open.target=self;
+    self.addMenuItem=[menu addItemWithTitle:@"Aggiungi pesi" action:@selector(addWeights:) keyEquivalent:@""];self.addMenuItem.target=self;
+    NSMenuItem *quit=[menu addItemWithTitle:@"Chiudi Jase Tunnel" action:@selector(quit:) keyEquivalent:@""];quit.target=self;
+    self.statusItem.menu=menu;
+
+    NSMenu *main=[[[NSMenu alloc] init] autorelease];NSMenuItem *root=[[[NSMenuItem alloc] init] autorelease];[main addItem:root];
+    NSMenu *app=[[[NSMenu alloc] initWithTitle:@"Jase Tunnel"] autorelease];root.submenu=app;
+    NSMenuItem *panel=[app addItemWithTitle:@"Apri Jase Tunnel" action:@selector(showPanel:) keyEquivalent:@","];panel.target=self;
+    NSMenuItem *add=[app addItemWithTitle:@"Aggiungi pesi…" action:@selector(addWeights:) keyEquivalent:@"o"];add.target=self;
+    [app addItem:NSMenuItem.separatorItem];[app addItemWithTitle:@"Nascondi Jase Tunnel" action:@selector(hide:) keyEquivalent:@"h"];
+    [app addItem:NSMenuItem.separatorItem];NSMenuItem *exit=[app addItemWithTitle:@"Chiudi Jase Tunnel" action:@selector(quit:) keyEquivalent:@"q"];exit.target=self;
+    NSMenuItem *editRoot=[[[NSMenuItem alloc] init] autorelease];[main addItem:editRoot];NSMenu *edit=[[[NSMenu alloc] initWithTitle:@"Modifica"] autorelease];editRoot.submenu=edit;
+    [edit addItemWithTitle:@"Copia" action:@selector(copy:) keyEquivalent:@"c"];[edit addItemWithTitle:@"Seleziona tutto" action:@selector(selectAll:) keyEquivalent:@"a"];
+    NSMenuItem *windowRoot=[[[NSMenuItem alloc] init] autorelease];[main addItem:windowRoot];NSMenu *windows=[[[NSMenu alloc] initWithTitle:@"Finestra"] autorelease];windowRoot.submenu=windows;
+    [windows addItemWithTitle:@"Chiudi finestra" action:@selector(performClose:) keyEquivalent:@"w"];NSApp.mainMenu=main;NSApp.windowsMenu=windows;
+
+    self.window=[[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,760,700) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO] autorelease];
+    self.window.title=@"Jase Tunnel";self.window.subtitle=@"Il tuo modello, gli strumenti di Jase";self.window.minSize=NSMakeSize(680,640);
+    self.window.releasedWhenClosed=NO;self.window.delegate=self;[self.window center];
+    self.statusIcon=[NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"network" accessibilityDescription:@"Collegamento"]];
+    [self.statusIcon.widthAnchor constraintEqualToConstant:28].active=YES;[self.statusIcon.heightAnchor constraintEqualToConstant:28].active=YES;
+    self.statusTitle=JaseLabel(@"Jase Tunnel è in esecuzione",15,NSFontWeightSemibold);
+    self.statusDetail=JaseLabel(@"In attesa della scheda Jase IA",11,NSFontWeightRegular);self.statusDetail.textColor=NSColor.secondaryLabelColor;
+    NSStackView *status=JaseStack(@[self.statusTitle,self.statusDetail],NSUserInterfaceLayoutOrientationVertical);status.spacing=5;
+    NSStackView *header=JaseStack(@[self.statusIcon,status,JaseSpacer(),[self button:@"Apri Jase IA" action:@selector(openJase:)]],NSUserInterfaceLayoutOrientationHorizontal);
+    self.tabs=[[[NSTabView alloc] init] autorelease];self.tabs.tabViewType=NSTopTabsBezelBorder;
+    NSTabViewItem *models=[[[NSTabViewItem alloc] initWithIdentifier:@"models"] autorelease];models.label=@"Modelli";models.view=[self modelPane];[self.tabs addTabViewItem:models];
+    NSTabViewItem *activity=[[[NSTabViewItem alloc] initWithIdentifier:@"activity"] autorelease];activity.label=@"Attività";activity.view=[self activityPane];[self.tabs addTabViewItem:activity];
+    [self.tabs.heightAnchor constraintGreaterThanOrEqualToConstant:300].active=YES;
+    self.debugButton=[NSButton checkboxWithTitle:@"Log dettagliato, inclusi i testi" target:self action:@selector(debugChanged:)];
+    self.thinkingButton=[NSButton checkboxWithTitle:@"Ragionamento del modello" target:self action:@selector(thinkingChanged:)];
+    NSStackView *options=JaseStack(@[self.debugButton,self.thinkingButton,JaseSpacer()],NSUserInterfaceLayoutOrientationHorizontal);
+    self.privacy=[NSTextField wrappingLabelWithString:@"Registro privato sul Mac · Ultimi 300 eventi. Chiudendo la finestra, il tunnel resta attivo nella barra dei menu."];
+    self.privacy.font=[NSFont systemFontOfSize:11];self.privacy.textColor=NSColor.secondaryLabelColor;
+    self.version=JaseLabel(@"",10,NSFontWeightRegular);self.version.textColor=NSColor.tertiaryLabelColor;
+    NSStackView *footer=JaseStack(@[self.version,JaseSpacer(),[self button:@"Chiudi Jase Tunnel" action:@selector(quit:)]],NSUserInterfaceLayoutOrientationHorizontal);
+    NSStackView *content=JaseStack(@[header,self.tabs,options,self.privacy,footer],NSUserInterfaceLayoutOrientationVertical);content.spacing=14;
+    JasePin(content,self.window.contentView,20);
+    for(NSView *child in @[header,self.tabs,options,self.privacy,footer]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
+    [self refresh:nil];self.timer=[NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
+    [self showPanel:nil];
+}
+- (void)showPanel:(id)sender { [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES]; }
+- (void)openJase:(id)sender { jaseDesktopAction("open-jase",0); }
+- (void)quit:(id)sender { jaseDesktopQuit(); }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender { jaseDesktopQuit();return NSTerminateCancel; }
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)visible { [self showPanel:nil];return YES; }
+- (void)addWeights:(id)sender {
+    if(self.importing)return;[self showPanel:nil];[self.tabs selectTabViewItemWithIdentifier:@"models"];
+    NSOpenPanel *picker=[NSOpenPanel openPanel];picker.title=@"Aggiungi pesi a Jase Tunnel";
+    picker.message=@"Scegli un file GGUF o una cartella di pesi compatibile con Ollama.";picker.prompt=@"Aggiungi pesi";
+    picker.canChooseFiles=YES;picker.canChooseDirectories=YES;picker.allowsMultipleSelection=NO;
+    [picker beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response){
+        if(response!=NSModalResponseOK)return;NSURL *url=picker.URL;NSNumber *directory=nil;
+        [url getResourceValue:&directory forKey:NSURLIsDirectoryKey error:nil];
+        [self beginImport];jaseDesktopImport((char *)url.path.UTF8String,directory.boolValue);
+    }];
+}
+- (void)beginImport {
+    self.importing=YES;self.addButton.enabled=NO;self.addMenuItem.enabled=NO;self.importButton.enabled=NO;
+    [self.progress startAnimation:nil];self.notice.stringValue=@"Aggiungo i pesi al motore locale…";
+}
+- (void)importSelected:(id)sender {
+    NSInteger row=self.modelTable.selectedRow;if(self.importing||row<0||row>=self.models.count)return;
+    NSString *identifier=self.models[row][@"id"];if(!identifier)return;
+    [self beginImport];jaseDesktopImportFound((char *)identifier.UTF8String);
+}
+- (void)finishImport:(NSString *)message {
+    self.importing=NO;self.addButton.enabled=YES;self.addMenuItem.enabled=YES;[self.progress stopAnimation:nil];
+    self.notice.stringValue=message;[self updateImportButton];[self refresh:nil];
+}
+- (void)updateImportButton {
+    NSInteger row=self.modelTable.selectedRow;
+    self.importButton.enabled=!self.importing&&row>=0&&row<self.models.count&&self.models[row][@"id"]!=nil;
+}
+- (void)debugChanged:(id)sender { jaseDesktopAction("debug",self.debugButton.state==NSControlStateValueOn);[self refresh:nil]; }
+- (void)thinkingChanged:(id)sender { jaseDesktopAction("thinking",self.thinkingButton.state==NSControlStateValueOn);[self refresh:nil]; }
+- (void)clearLog:(id)sender { jaseDesktopAction("clear",0);[self refresh:nil]; }
+- (void)filterChanged:(id)sender { [self reloadEvents]; }
+- (void)reloadEvents {
+    NSInteger selected=self.logTable.selectedRow;id selectedID=selected>=0&&selected<self.filteredEvents.count?self.filteredEvents[selected][@"id"]:nil;
+    NSString *filter=self.filter.selectedItem.representedObject;NSMutableArray *list=[NSMutableArray array];
+    for(NSDictionary *event in self.events)if([filter isEqual:@"all"]||[event[@"category"] isEqual:filter]||([filter isEqual:@"error"]&&[event[@"level"] isEqual:@"error"]))[list addObject:event];
+    BOOL atBottom=NSMaxY(self.logTable.visibleRect)>=NSHeight(self.logTable.bounds)-32;
+    self.filteredEvents=list;[self.logTable reloadData];
+    NSUInteger found=selectedID?[list indexOfObjectPassingTest:^BOOL(NSDictionary *e,NSUInteger idx,BOOL *stop){return [e[@"id"] isEqual:selectedID];}]:NSNotFound;
+    if(found!=NSNotFound)[self.logTable selectRowIndexes:[NSIndexSet indexSetWithIndex:found] byExtendingSelection:NO];
+    else self.detail.string=@"Seleziona un evento per leggerne i dettagli.";
+    if(atBottom&&list.count)[self.logTable scrollRowToVisible:list.count-1];
+}
+- (void)refresh:(id)sender {
+    self.statusItem.button.image=JaseIcon(20,YES);
+    char *raw=jaseDesktopState(self.cursor);if(!raw)return;
+    NSData *data=[[NSString stringWithUTF8String:raw] dataUsingEncoding:NSUTF8StringEncoding];free(raw);
+    NSDictionary *state=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];if(!state[@"models"])return;
+    NSMutableArray *models=[NSMutableArray array];
+    for(NSDictionary *m in state[@"models"])[models addObject:@{@"name":m[@"name"],@"engine":[m[@"engine"] isEqual:@"ollama"]?@"Ollama":@"LM Studio",@"status":[m[@"tools"] boolValue]?@"Pronto":@"Strumenti non disponibili"}];
+    for(NSDictionary *f in state[@"files"])[models addObject:@{@"id":f[@"id"],@"name":f[@"name"],@"engine":f[@"format"],@"status":@"Pesi da aggiungere"}];
+    if(![self.models isEqual:models]){self.models=models;[self.modelTable reloadData];[self updateImportButton];}
+    BOOL reset=self.firstState||self.generation!=[state[@"generation"] unsignedLongLongValue];
+    if(reset){[self.events removeAllObjects];self.generation=[state[@"generation"] unsignedLongLongValue];self.firstState=NO;}
+    [self.events addObjectsFromArray:state[@"events"]];if(self.events.count>300)[self.events removeObjectsInRange:NSMakeRange(0,self.events.count-300)];
+    self.cursor=[state[@"cursor"] unsignedLongLongValue];if(reset||[state[@"events"] count])[self reloadEvents];
+    NSMutableArray *online=[NSMutableArray array];for(NSDictionary *c in state[@"connections"])if([c[@"connected"] boolValue])[online addObject:c[@"origin"]];
+    self.statusTitle.stringValue=online.count?@"Collegato a Jase":@"Jase Tunnel è in esecuzione";
+    self.statusDetail.stringValue=online.count?[online componentsJoinedByString:@" · "]:@"Apri Jase IA e scegli «Usa il mio modello»";
+    self.statusIcon.contentTintColor=online.count?NSColor.systemGreenColor:NSColor.secondaryLabelColor;
+    NSDictionary *stats=state[@"statistics"];
+    self.statistics.stringValue=[NSString stringWithFormat:@"%@ invii   ·   %@ ricezioni   ·   %@ turni del modello   ·   %@ errori",stats[@"sent"],stats[@"received"],stats[@"modelTurns"],stats[@"errors"]];
+    self.debugButton.state=[state[@"debug"] boolValue]?NSControlStateValueOn:NSControlStateValueOff;
+    self.thinkingButton.state=[state[@"thinking"] boolValue]?NSControlStateValueOn:NSControlStateValueOff;
+    self.privacy.stringValue=[state[@"debug"] boolValue]?@"I testi restano su questo Mac e possono contenere dati personali. Disattivando il log si svuota il registro; i file già scritti restano sul disco.":@"Registro privato sul Mac · Ultimi 300 eventi. Chiudendo la finestra, il tunnel resta attivo nella barra dei menu.";
+    self.version.stringValue=[@"Jase Tunnel · " stringByAppendingString:state[@"version"]];
+}
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)table { return table==self.modelTable?self.models.count:self.filteredEvents.count; }
+- (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
+    NSTextField *label=[table makeViewWithIdentifier:column.identifier owner:self];
+    if(!label){label=JaseLabel(@"",12,NSFontWeightRegular);label.identifier=column.identifier;label.selectable=NO;}
+    label.textColor=NSColor.labelColor;
+    if(table==self.modelTable){label.stringValue=self.models[row][column.identifier]?:@"";return label;}
+    NSDictionary *event=self.filteredEvents[row];
+    if([column.identifier isEqual:@"time"]){NSDate *date=[self.dates dateFromString:event[@"time"]];label.stringValue=date?[self.clock stringFromDate:date]:@"";label.textColor=NSColor.secondaryLabelColor;}
+    else {
+        NSString *symbol=@{@"server":@"↑",@"receive":@"↓",@"model":@"◇",@"app":@"•"}[event[@"category"]]?:@"•";
+        label.stringValue=[NSString stringWithFormat:@"%@  %@",symbol,event[@"title"]];
+        if([event[@"level"] isEqual:@"error"])label.textColor=NSColor.systemRedColor;
+    }
+    label.toolTip=label.stringValue;return label;
+}
+- (void)tableViewSelectionDidChange:(NSNotification *)notification {
+    if(notification.object==self.modelTable){[self updateImportButton];return;}
+    NSInteger row=self.logTable.selectedRow;if(row<0||row>=self.filteredEvents.count)return;
+    NSDictionary *event=self.filteredEvents[row];self.detail.string=[NSString stringWithFormat:@"%@\n%@",event[@"title"],event[@"detail"]?:@"Nessun dettaglio aggiuntivo."];
+}
+@end
+
+static JaseDesktopDelegate *desktop;
+void JaseRunDesktop(void) {
+    @autoreleasepool {
+        [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        desktop=[JaseDesktopDelegate new];NSApp.delegate=desktop;
+        // A replacement alert may already have completed application launching
+        // before this delegate existed. Set up once in both startup paths.
+        [desktop setupInterface];[NSApp run];
+        [desktop.timer invalidate];[NSStatusBar.systemStatusBar removeStatusItem:desktop.statusItem];[desktop.window orderOut:nil];NSApp.delegate=nil;
+        [desktop release];desktop=nil;
+    }
+}
+void JaseShowDesktop(void) { dispatch_async(dispatch_get_main_queue(),^{[desktop showPanel:nil];}); }
+void JaseImportFinished(const char *message) {
+    NSString *text=[NSString stringWithUTF8String:message];dispatch_async(dispatch_get_main_queue(),^{[desktop finishImport:text];});
+}
+void JaseStopDesktop(void) {
+    dispatch_async(dispatch_get_main_queue(),^{
+        [desktop.timer invalidate];[NSApp stop:nil];
+        [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined location:NSZeroPoint modifierFlags:0 timestamp:0 windowNumber:0 context:nil subtype:0 data1:0 data2:0] atStart:YES];
+    });
+}
+int JaseConfirmReplacement(void) {
+    @autoreleasepool {
+        [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];
+        NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=@"Una versione precedente di Jase Tunnel è già aperta";
+        alert.informativeText=@"Riavviala per usare il nuovo pannello. Le richieste in corso verranno interrotte.";
+        [alert addButtonWithTitle:@"Riavvia Jase Tunnel"];[alert addButtonWithTitle:@"Annulla"];return [alert runModal]==NSAlertFirstButtonReturn;
+    }
+}
+void JaseStartupError(const char *message) {
+    @autoreleasepool {[NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=@"Jase Tunnel non può avviarsi";alert.informativeText=[NSString stringWithUTF8String:message];[alert runModal];}
+}
