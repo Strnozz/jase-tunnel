@@ -64,6 +64,26 @@ func jaseDesktopAction(action *C.char, enabled C.int) {
 		a.clearActivity()
 	case "open-jase":
 		go a.openJase()
+	case "revoke-sites":
+		go a.revokeWebLinks()
+	}
+}
+
+//export jaseDesktopApproval
+func jaseDesktopApproval() *C.char {
+	if desktopApplication == nil {
+		return C.CString("null")
+	}
+	data, _ := json.Marshal(desktopApplication.claimWebApproval())
+	return C.CString(string(data))
+}
+
+//export jaseDesktopConsent
+func jaseDesktopConsent(id, model *C.char) {
+	if desktopApplication != nil {
+		a := desktopApplication
+		identifier, key := C.GoString(id), C.GoString(model)
+		go a.answerWebConsent(identifier, key)
 	}
 }
 

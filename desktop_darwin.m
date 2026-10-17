@@ -7,6 +7,8 @@ extern char *jaseDesktopState(unsigned long long);
 extern void jaseDesktopAction(char *, int);
 extern void jaseDesktopImport(char *, int);
 extern void jaseDesktopImportFound(char *);
+extern char *jaseDesktopApproval(void);
+extern void jaseDesktopConsent(char *,char *);
 
 // Artwork comes from the website favicon, rasterized by the package builder.
 // The app keeps its colors; the menu bar uses the favicon's white silhouette.
@@ -74,6 +76,7 @@ static NSView *JaseSpacer(void) {
 @property unsigned long long generation;
 @property BOOL firstState;
 @property BOOL importing;
+@property BOOL consenting;
 - (void)setupInterface;
 @end
 
@@ -179,7 +182,7 @@ static NSView *JaseSpacer(void) {
     [self.tabs.heightAnchor constraintGreaterThanOrEqualToConstant:300].active=YES;
     self.debugButton=[NSButton checkboxWithTitle:@"Log dettagliato, inclusi i testi" target:self action:@selector(debugChanged:)];
     self.thinkingButton=[NSButton checkboxWithTitle:@"Ragionamento del modello" target:self action:@selector(thinkingChanged:)];
-    NSStackView *options=JaseStack(@[self.debugButton,self.thinkingButton,JaseSpacer()],NSUserInterfaceLayoutOrientationHorizontal);
+    NSStackView *options=JaseStack(@[self.debugButton,self.thinkingButton,JaseSpacer(),[self button:@"Scollega siti" action:@selector(revokeSites:)]],NSUserInterfaceLayoutOrientationHorizontal);
     self.privacy=[NSTextField wrappingLabelWithString:@"Registro privato sul Mac · Ultimi 300 eventi. Chiudendo la finestra, il tunnel resta attivo nella barra dei menu."];
     self.privacy.font=[NSFont systemFontOfSize:11];self.privacy.textColor=NSColor.secondaryLabelColor;
     self.version=JaseLabel(@"",10,NSFontWeightRegular);self.version.textColor=NSColor.tertiaryLabelColor;
@@ -192,6 +195,7 @@ static NSView *JaseSpacer(void) {
 }
 - (void)showPanel:(id)sender { [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES]; }
 - (void)openJase:(id)sender { jaseDesktopAction("open-jase",0); }
+- (void)revokeSites:(id)sender { jaseDesktopAction("revoke-sites",0); }
 - (void)quit:(id)sender { jaseDesktopQuit(); }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender { jaseDesktopQuit();return NSTerminateCancel; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
@@ -240,6 +244,22 @@ static NSView *JaseSpacer(void) {
     if(atBottom&&list.count)[self.logTable scrollRowToVisible:list.count-1];
 }
 - (void)refresh:(id)sender {
+    if(!self.consenting&&!self.importing){
+        char *rawApproval=jaseDesktopApproval();NSData *approvalData=[[NSString stringWithUTF8String:rawApproval] dataUsingEncoding:NSUTF8StringEncoding];free(rawApproval);
+        id approval=[NSJSONSerialization JSONObjectWithData:approvalData options:NSJSONReadingFragmentsAllowed error:nil];
+        if([approval isKindOfClass:NSDictionary.class]){
+            self.consenting=YES;[self showPanel:nil];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=@"Collega questo sito al tuo modello?";
+            alert.informativeText=[NSString stringWithFormat:@"%@\n%@\n\nIl sito invierà messaggi e dati al modello. Risposte e richieste di strumenti torneranno al suo server. I pesi restano sul computer. Il collegamento dura al massimo 30 minuti.",approval[@"name"],approval[@"origin"]];
+            NSPopUpButton *models=[[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,30) pullsDown:NO] autorelease];
+            for(NSDictionary *model in approval[@"models"])[models addItemWithTitle:model[@"name"]];alert.accessoryView=models;
+            NSButton *allow=[alert addButtonWithTitle:@"Consenti con questo modello"];allow.enabled=[approval[@"models"] count]>0;[alert addButtonWithTitle:@"Rifiuta"];
+            if(![approval[@"models"] count])alert.informativeText=[alert.informativeText stringByAppendingString:@"\n\nAvvia un modello compatibile in Ollama o LM Studio, poi riprova dalla pagina."];
+            [alert beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse answer){
+                NSString *key=@"";if(answer==NSAlertFirstButtonReturn&&models.indexOfSelectedItem>=0)key=approval[@"models"][models.indexOfSelectedItem][@"key"];
+                jaseDesktopConsent((char *)[approval[@"id"] UTF8String],(char *)key.UTF8String);self.consenting=NO;
+            }];
+        }
+    }
     self.statusItem.button.image=JaseIcon(20,YES);
     char *raw=jaseDesktopState(self.cursor);if(!raw)return;
     NSData *data=[[NSString stringWithUTF8String:raw] dataUsingEncoding:NSUTF8StringEncoding];free(raw);

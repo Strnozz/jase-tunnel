@@ -52,6 +52,7 @@ const (
 	idModelList = 111
 	idEventList = 112
 	idOpenSite  = 113
+	idRevoke    = 114
 )
 
 type winPoint struct{ X, Y int32 }
@@ -98,6 +99,7 @@ type windowsPanel struct {
 	generation                                                  uint64
 	imports                                                     <-chan string
 	activity, tray                                              bool
+	consenting                                                  bool
 	scale                                                       int
 }
 
@@ -233,6 +235,8 @@ func (p *windowsPanel) command(id, notification int) {
 		p.selectWeights()
 	case idQuit:
 		p.a.cancel()
+	case idRevoke:
+		go p.a.revokeWebLinks()
 	case idOpenSite:
 		go p.a.openJase()
 	case idModels:
@@ -369,6 +373,7 @@ func (p *windowsPanel) layout() {
 	p.position(p.controls[idQuit], w-190, 84, 166, 30)
 	p.position(p.controls[idModels], 24, 130, 130, 30)
 	p.position(p.controls[idActivity], 166, 130, 130, 30)
+	p.position(p.controls[idRevoke], w-190, 130, 166, 30)
 	p.position(p.controls[idModelList], 24, 174, w-48, h-365)
 	p.position(p.controls[idImport], 24, h-181, 190, 30)
 	p.position(p.notice, 24, h-143, w-48, 40)
@@ -423,6 +428,29 @@ func boolFlag(b bool) uintptr {
 	return 0
 }
 func (p *windowsPanel) refresh() {
+	if !p.consenting {
+		if approval := p.a.claimWebApproval(); approval != nil {
+			p.consenting = true
+			defer func() { p.consenting = false }()
+			key := ""
+			p.show()
+			if len(approval.Models) > 0 && winMessageBox(p.hwnd, webConsentText(approval)+"\n\nPremi Sì, poi scegli il modello da autorizzare.", 0x4|0x20|0x100) == 6 {
+				menu := winCall("CreatePopupMenu")
+				for i, m := range approval.Models {
+					winAppend(menu, 1000+i, "Consenti con "+m.Name)
+				}
+				winAppend(menu, 999, "Rifiuta")
+				selected := p.popup(menu) - 1000
+				winCall("DestroyMenu", menu)
+				if selected >= 0 && selected < len(approval.Models) {
+					key = approval.Models[selected].Key
+				}
+			} else if len(approval.Models) == 0 {
+				winMessageBox(p.hwnd, webConsentText(approval)+"\n\nAvvia un modello compatibile in Ollama o LM Studio, poi riprova.", 0x40)
+			}
+			go p.a.answerWebConsent(approval.ID, key)
+		}
+	}
 	if p.imports != nil {
 		select {
 		case message := <-p.imports:
@@ -517,7 +545,7 @@ func (a *application) runDesktopUI() {
 	for _, button := range []struct {
 		id   int
 		text string
-	}{{idOpenSite, "Apri Jase"}, {idAdd, "Aggiungi pesi…"}, {idQuit, trayLabels[2]}, {idModels, "Modelli"}, {idActivity, "Attività"}, {idImport, "Aggiungi selezionati"}, {idClear, "Svuota registro"}} {
+	}{{idRevoke, "Scollega siti"}, {idOpenSite, "Apri Jase"}, {idAdd, "Aggiungi pesi…"}, {idQuit, trayLabels[2]}, {idModels, "Modelli"}, {idActivity, "Attività"}, {idImport, "Aggiungi selezionati"}, {idClear, "Svuota registro"}} {
 		p.child("BUTTON", button.text, 0x10000, button.id)
 	}
 	p.child("BUTTON", "Log dettagliato, inclusi i testi", 0x10003, idDebug)

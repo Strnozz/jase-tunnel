@@ -6,9 +6,9 @@ App desktop che collega i modelli eseguiti sul computer dell’utente agli strum
 
 **Scarichi Jase Tunnel, lo apri e l’app ti indica se puoi collegarti al sito.** Un solo programma, senza estensioni obbligatorie, registrazione o servizi di tunnel esterni a pagamento.
 
-L’obiettivo successivo è permettere anche ad altri siti di dichiarare la propria compatibilità e mostrarla nell’app. Questa copia contiene il collegamento già implementato con Jase: il riconoscimento di altri siti e le relative notifiche sono ancora da sviluppare. L’app attuale non legge le schede del browser.
+La versione 0.2 aggiunge il protocollo `jase-tunnel-v1` per servizi indipendenti. Il sito integra il modulo, si annuncia al tunnel e pubblica un manifest verificato. La persona conferma dominio e modello nel pannello nativo. L’app non legge le schede del browser; il contatto parte dalle pagine compatibili, nel rispetto dei permessi del browser. La compatibilità compare nel registro locale; le notifiche di sistema e il silenziamento per sito restano da sviluppare.
 
-La prima proposta del flusso e del protocollo per piattaforme indipendenti è in [docs/WEB-STANDARD.md](docs/WEB-STANDARD.md): dichiarazione del sito, scoperta, notifica, consenso e collegamento alla LLM scelta dall’utente. È una specifica di progetto, ancora da implementare.
+La prima proposta del flusso e del protocollo per piattaforme indipendenti è in [docs/WEB-STANDARD.md](docs/WEB-STANDARD.md): dichiarazione del sito, scoperta, notifica, consenso e collegamento alla LLM scelta dall’utente. La proposta resta più ampia della versione implementata: streaming, notifiche di sistema e broker distribuito non sono inclusi.
 
 ## Cosa contiene oggi
 
@@ -80,8 +80,8 @@ Il repository pubblico degli eseguibili è [Strnozz/jase-tunnel](https://github.
 
 Il workflow `release.yml` si attiva sulla pubblicazione di un tag che corrisponde a `VERSION`:
 
-- `v0.1.0`: release stabile per il sito di produzione.
-- `dev-v0.1.0-preview1`: prerelease per localhost, compilata con `--dev`.
+- `v0.2.0`: release stabile per il sito di produzione.
+- `dev-v0.2.0-preview1`: prerelease per localhost, compilata con `--dev`.
 
 Prima verifica il codice sui tre sistemi, poi compila i cinque pacchetti sul runner Mac. Controlla commit, run, canale, inventario e SHA-256 e carica i file in una bozza. Solo dopo il caricamento completo rende pubblica la release. Un pacchetto per localhost non viene pubblicato come stabile; una release già pubblica non viene sovrascritta dai tentativi successivi.
 
@@ -93,7 +93,7 @@ Il sito Jase conserva il modulo web per riconoscere il sistema, proporre il puls
 
 Il sito deve implementare il protocollo `jase-companion-v1`, incluso il broker sul server. Quel componente appartiene al sito Jase e non è incluso in questa app. I dettagli e i confini attuali sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-La versione ordinaria accetta `https://jaseengine.it`; `--dev` abilita anche le origini HTTP su loopback. La copia conserva le restrizioni e i controlli di sicurezza esistenti. Il futuro supporto ad altri siti richiederà un’integrazione esplicita, mantenendo l’esperienza di una sola app da scaricare.
+Il percorso legacy accetta `https://jaseengine.it`; i nuovi siti HTTPS pubblici usano esclusivamente le API `/tunnel/v1/`, il manifest e il consenso nativo. Non accedono a inventario, file, importazione o registro del percorso legacy. Le destinazioni remote sono controllate a ogni connessione, senza proxy o redirect, e la connessione viene vincolata agli IP pubblici verificati. `--dev` abilita origini HTTP su loopback. I collegamenti web scadono dopo trenta minuti e restano vincolati al modello scelto; **Scollega siti** li revoca e annulla le inferenze attive.
 
 ## Struttura
 
@@ -107,3 +107,9 @@ La versione ordinaria accetta `https://jaseengine.it`; `--dev` abilita anche le 
 | `VERSION` | Versione dell’app |
 
 Il modulo Go conserva il nome interno `jase/companion`. Questo repository è l’unica sede dei sorgenti dell’app; il progetto Jase mantiene soltanto l’integrazione web.
+
+## Modulo installabile nei progetti
+
+Il pacchetto indipendente è in [`packages/sdk`](packages/sdk/README.md). `init` rileva tool IA esportati, prepara configurazione e registro e, su Next.js App Router, installa pulsante, pannello e broker. `tools add` aggiunge un tool manualmente. La scansione non importa codice del progetto, non legge dati/credenziali e non usa servizi IA esterni. I permessi applicativi rimangono negli esecutori del servizio.
+
+La distribuzione usa un normale tarball npm da GitHub Releases: il workflow `sdk.yml` controlla il pacchetto su tre sistemi e pubblica soltanto tag `sdk-vX.Y.Z`. Le release SDK non diventano l’ultima release dell’app. Prima della pubblicazione, `npm run sdk:pack` crea il pacchetto locale in `.deploy-check/`. Dettagli, limiti e comando di installazione nel README del pacchetto.

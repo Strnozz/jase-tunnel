@@ -36,6 +36,10 @@ var version = "dev"
 var devBuild = "false"
 
 type link struct {
+	Protocol     string `json:"protocol,omitempty"`
+	Broker       string `json:"broker,omitempty"`
+	Model        model  `json:"model,omitempty"`
+	ExpiresAt    int64  `json:"expiresAt,omitempty"`
 	Origin       string `json:"origin"`
 	Token        string `json:"token"`
 	ConnectionID string `json:"connectionId"`
@@ -66,6 +70,9 @@ type application struct {
 	site     string
 	activity activityLog
 	nativeUI bool
+	web      *webManager
+	webRuns  map[string]context.CancelFunc
+	webHTTP  *http.Client
 }
 
 func main() {
@@ -189,7 +196,7 @@ func main() {
 		connections := append([]link{}, app.settings.Links...)
 		app.mu.RUnlock()
 		for _, connection := range connections {
-			if allowedOrigin(connection.Origin) {
+			if allowedOrigin(connection.Origin) && connection.Protocol == "" || validWebLink(connection) {
 				app.startLink(connection)
 			}
 		}
@@ -286,6 +293,10 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "Indirizzo locale non valido.")
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/tunnel/v1/") {
+		a.serveWeb(w, r)
+		return
+	}
 	origin := r.Header.Get("Origin")
 	localOrigin := fmt.Sprintf("http://127.0.0.1:%d", a.port)
 	if origin != "" && !allowedOrigin(origin) && origin != localOrigin {
@@ -313,7 +324,9 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		files := append([]modelFile{}, a.files...)
 		connectionIDs := []string{}
 		for _, c := range a.settings.Links {
-			connectionIDs = append(connectionIDs, c.ConnectionID)
+			if c.Protocol == "" {
+				connectionIDs = append(connectionIDs, c.ConnectionID)
+			}
 		}
 		a.mu.RUnlock()
 		ui := ""

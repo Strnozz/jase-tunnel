@@ -27,3 +27,8 @@ connections.json.tmp
 ._*
 .vscode/
 .idea/
+
+# Web SDK generated output
+/packages/sdk/node_modules/
+/packages/sdk/dist/
+*.tgz

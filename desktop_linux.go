@@ -392,6 +392,38 @@ func (p *linuxPanel) refresh() {
 	}
 	p.updating = true
 	defer func() { p.updating = false }()
+	if approval := p.a.claimWebApproval(); approval != nil {
+		d := gtk.GtkDialogNew()
+		gtk.GtkWindowSetTitle(d, "Collega sito a Jase Tunnel")
+		gtk.GtkWindowSetModal(d, 1)
+		gtk.GtkWindowSetTransientFor(d, p.window)
+		area := gtk.GtkDialogGetContentArea(d)
+		box := gtk.GtkBoxNew(1, 12)
+		gtk.GtkContainerSetBorderWidth(box, 20)
+		gtk.GtkContainerAdd(area, box)
+		gtkPack(box, gtkLabel(webConsentText(approval)), false)
+		models := gtk.GtkComboBoxTextNew()
+		for _, m := range approval.Models {
+			gtk.GtkComboBoxTextAppendText(models, m.Name)
+		}
+		gtk.GtkComboBoxSetActive(models, 0)
+		gtkPack(box, models, false)
+		gtk.GtkDialogAddButton(d, "Rifiuta", -6)
+		allow := gtk.GtkDialogAddButton(d, "Consenti con questo modello", -3)
+		if len(approval.Models) == 0 {
+			gtk.GtkWidgetSetSensitive(allow, 0)
+			gtkPack(box, gtkLabel("Avvia un modello compatibile in Ollama o LM Studio, poi riprova."), false)
+		}
+		gtk.GtkWidgetShowAll(d)
+		answer := gtk.GtkDialogRun(d)
+		selected := int(gtk.GtkComboBoxGetActive(models))
+		key := ""
+		if answer == -3 && selected >= 0 && selected < len(approval.Models) {
+			key = approval.Models[selected].Key
+		}
+		gtk.GtkWidgetDestroy(d)
+		go p.a.answerWebConsent(approval.ID, key)
+	}
 	if p.imports != nil {
 		select {
 		case message := <-p.imports:
@@ -463,6 +495,7 @@ func (a *application) runDesktopUI() {
 	buttons := gtk.GtkBoxNew(0, 10)
 	gtkPack(root, buttons, false)
 	gtkButton(buttons, "Apri Jase", func() { go a.openJase() })
+	gtkButton(buttons, "Scollega siti", func() { go a.revokeWebLinks() })
 	p.add = gtkButton(buttons, "Aggiungi pesi…", p.chooseWeights)
 	gtkButton(buttons, trayLabels[2], a.cancel)
 	tabs := gtk.GtkNotebookNew()

@@ -2,7 +2,7 @@
 
 Bozza di progetto 0.1 · 17 ottobre 2026 · identificatore proposto: `jase-tunnel-v1`.
 
-Questa è la prima specifica da implementare e verificare con siti indipendenti. Il programma attuale usa `jase-companion-v1`: le API descritte qui non sono ancora disponibili. I termini DEVE, NON DEVE e DOVREBBE indicano requisiti della proposta.
+Questa è la specifica proposta. La versione 0.2 implementa scoperta, verifica di rete, ricevute, consenso nativo, collegamenti con modello fissato, broker/SDK e installatore Next.js; conserva `jase-companion-v1` separato. Sono ancora proposte le notifiche di sistema con silenziamento, l’estensione a framework non adattati e il collaudo completo della matrice browser. Non si dichiara ancora uno standard pubblico completo. I termini DEVE, NON DEVE e DOVREBBE indicano requisiti della proposta.
 
 ## 1. Esperienza dell’utente
 
@@ -36,7 +36,7 @@ Pertanto l’esperienza automatica è garantibile **dopo il consenso richiesto d
 | Trasporto | `protocol.go`, richieste in uscita al broker del sito | Profilo interoperabile e credenziali separate per sito e sessione |
 | Inferenza | `models.go`, Ollama e LM Studio locali | Applicazione dei limiti e del modello autorizzato a ogni turno |
 | Strumenti | Schemi `tool`, richieste `toolCall` | La piattaforma continua a verificare ed eseguire le proprie funzioni |
-| Interfaccia | AppKit su macOS; pagina locale sugli altri sistemi | Elenco siti, notifiche e controlli di autorizzazione su tutti i sistemi supportati |
+| Interfaccia | AppKit su macOS, Win32 su Windows, GTK 3 su Linux | Elenco siti, notifiche e controlli di autorizzazione su tutti i sistemi supportati |
 | Riservatezza | Token e percorsi completi conservati localmente | Nessun inventario o identificatore di altri siti nelle nuove API |
 
 Il backend e il frontend Jase non sono inclusi in questa cartella. Anche Jase dovrà integrare la nuova scoperta e il nuovo broker.

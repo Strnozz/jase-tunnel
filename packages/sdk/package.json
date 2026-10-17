@@ -1,0 +1,99 @@
+{
+  "name": "@jase-tunnel/sdk",
+  "version": "0.2.0",
+  "description": "Installazione e strumenti web per Jase Tunnel, senza servizi di inferenza esterni.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "jase-tunnel": "bin/cli.mjs"
+  },
+  "exports": {
+    "./legacy": {
+      "types": "./dist/legacy/index.d.ts",
+      "default": "./dist/legacy/index.js"
+    },
+    "./platforms": {
+      "types": "./dist/legacy/platforms.d.ts",
+      "default": "./dist/legacy/platforms.js"
+    },
+    "./releases": {
+      "types": "./dist/legacy/releases.d.ts",
+      "default": "./dist/legacy/releases.js"
+    },
+    "./server": {
+      "types": "./src/server.d.mts",
+      "default": "./src/server.mjs"
+    },
+    "./browser": {
+      "types": "./src/browser.d.mts",
+      "default": "./src/browser.mjs"
+    },
+    "./react": {
+      "types": "./src/react.d.mts",
+      "default": "./src/react.mjs"
+    },
+    "./protocol": {
+      "types": "./dist/legacy/protocol.d.ts",
+      "default": "./dist/legacy/protocol.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "typescript": "5.9.3",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.0"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Strnozz/jase-tunnel.git",
+    "directory": "packages/sdk"
+  },
+  "typesVersions": {
+    "*": {
+      "legacy": [
+        "dist/legacy/index.d.ts"
+      ],
+      "platforms": [
+        "dist/legacy/platforms.d.ts"
+      ],
+      "releases": [
+        "dist/legacy/releases.d.ts"
+      ],
+      "server": [
+        "src/server.d.mts"
+      ],
+      "browser": [
+        "src/browser.d.mts"
+      ],
+      "react": [
+        "src/react.d.mts"
+      ],
+      "protocol": [
+        "dist/legacy/protocol.d.ts"
+      ]
+    }
+  }
+}
