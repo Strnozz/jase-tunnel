@@ -142,15 +142,21 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	}
 	a.answerWebConsent(approval.ID, approval.Models[0].Key)
 	waitWebState(t, a, origin, receipt.Receipt, "connected")
-	if len(a.settings.Links) != 1 || a.settings.Links[0].Model.Key != "ollama:fixture" {
+	a.mu.RLock()
+	links := append([]link{}, a.settings.Links...)
+	a.mu.RUnlock()
+	if len(links) != 1 || links[0].Model.Key != "ollama:fixture" {
 		t.Fatal("model grant missing")
 	}
 	active, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
-	a.webRuns = map[string]context.CancelFunc{a.settings.Links[0].Token: cancel}
+	a.webRuns = map[string]context.CancelFunc{links[0].Token: cancel}
 	a.mu.Unlock()
 	a.revokeWebLinks()
-	if active.Err() == nil || len(a.settings.Links) != 0 {
+	a.mu.RLock()
+	remaining := len(a.settings.Links)
+	a.mu.RUnlock()
+	if active.Err() == nil || remaining != 0 {
 		t.Fatal("revocation did not cancel active inference")
 	}
 	a.cancel()

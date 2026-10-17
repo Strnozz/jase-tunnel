@@ -24,8 +24,27 @@ func response(body string) *http.Response {
 }
 func newTestApp(t *testing.T) *application {
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	return &application{stateDir: t.TempDir(), port: 11439, ctx: ctx, cancel: cancel, client: &http.Client{}, running: map[string]bool{}, inference: make(chan struct{}, 1), paired: make(chan struct{})}
+	a := &application{stateDir: t.TempDir(), port: 11439, ctx: ctx, cancel: cancel, client: &http.Client{}, running: map[string]bool{}, inference: make(chan struct{}, 1), paired: make(chan struct{})}
+	t.Cleanup(func() { stopTestApp(t, a) })
+	return a
+}
+func stopTestApp(t *testing.T, a *application) {
+	t.Helper()
+	a.cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		a.mu.RLock()
+		workers := len(a.running)
+		a.mu.RUnlock()
+		if workers == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Error("test application polling workers did not stop")
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 func localRequest(method, path, body, origin string) *http.Request {
 	r := httptest.NewRequest(method, "http://127.0.0.1:11439"+path, strings.NewReader(body))

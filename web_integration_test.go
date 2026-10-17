@@ -131,6 +131,5 @@ func TestIndependentSDKDesktopRoundTrip(t *testing.T) {
 		t.Fatal("tool did not execute exactly once", string(raw))
 	}
 	a.revokeWebLinks()
-	a.cancel()
-	time.Sleep(20 * time.Millisecond)
+	stopTestApp(t, a)
 }
