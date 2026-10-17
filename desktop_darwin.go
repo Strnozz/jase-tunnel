@@ -23,6 +23,9 @@ import (
 )
 
 const desktopAvailable = true
+const desktopUIName = "appkit-v1"
+
+func prepareDesktopUI() error { return nil }
 
 // AppKit's event loop stays on the initial macOS thread. Discovery, imports and
 // inference remain on Go's worker threads, in the same application process.

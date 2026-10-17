@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
-import { companionIcons } from "./companion-icons.mjs";
+import { companionIcons, desktopIcon } from "./companion-icons.mjs";
 
 const args = process.argv.slice(2), option = name => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
 // Development packages are separate: a localhost download must never install
@@ -28,9 +28,10 @@ const ownRepository = existsSync(join(root, ".git"));
 const git = arguments_ => spawnSync("git", arguments_, { cwd: root, encoding: "utf8" });
 const head = ownRepository ? git(["rev-parse", "HEAD"]) : undefined;
 const revision = head?.status === 0 ? head.stdout.trim() : "local";
+await desktopIcon(join(root,"assets/icon.svg"),join(root,"assets/desktop-icon.png"));
 const status = ownRepository ? git(["status", "--porcelain"]) : undefined;
 const dirty = revision === "local" || status?.status !== 0 || !!status?.stdout.trim();
-const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod").map(name => join(root, name)), ...["assets/icon.svg", "scripts/companion-icons.mjs", "scripts/build.mjs", "package.json", "package-lock.json"].map(name => join(root, name))];
+const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/icon.svg", "assets/desktop-icon.png", "scripts/companion-icons.mjs", "scripts/build.mjs", "package.json", "package-lock.json"].map(name => join(root, name))];
 const sourceHash = createHash("sha256");
 for (const path of sources.sort()) sourceHash.update(readFileSync(path));
 const source = sourceHash.digest("hex").slice(0, 12);
@@ -64,7 +65,10 @@ try {
     const name = arch === "amd64" ? "x64" : arch;
     const windows = `Jase-Windows-${name}.exe`; compile("windows", arch, join(output, windows)); record(`windows-${name}`, windows);
     const dir = join(temporary, `linux-${name}`, "Jase"); mkdirSync(dir, { recursive: true }); compile("linux", arch, join(dir, "Jase")); chmodSync(join(dir, "Jase"), 0o755);
-    writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia Jase. Lascia aperta la scheda del sito su Usa il mio modello: il collegamento è automatico.\n\nPer l’uso da terminale: ./Jase --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
+    writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia Jase: si apre il pannello nativo con modelli, collegamenti e registro attività. Serve GTK 3 (libgtk-3-0 oppure libgtk-3-0t64 su Ubuntu/Debian).\n\nIl menu dell’icona offre Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Per l’area di notifica è consigliato Ayatana AppIndicator; sui desktop senza supporto alle icone, chiudere la finestra la riduce a icona nella barra applicazioni.\n\nLascia aperta la scheda Jase su Usa il mio modello per il collegamento automatico. Per terminare il processo scegli Chiudi Jase Tunnel nel pannello o nel menu.\n\nPer la diagnostica da terminale: ./Jase --headless --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
+    mkdirSync(join(dir,"LICENSES"),{recursive:true});
+    writeFileSync(join(dir,"LICENSES","purego.txt"),readFileSync(join(root,"third_party/purego-LICENSE")));
+    writeFileSync(join(dir,"LICENSES","NOTICE.txt"),readFileSync(join(root,"THIRD_PARTY_NOTICES.md")));
     const linux = `Jase-Linux-${name}.tar.gz`; run("tar", ["-czf", join(output, linux), "-C", join(temporary, `linux-${name}`), "Jase"]); record(`linux-${name}`, linux);
   }
   const app = join(temporary, "Jase Tunnel.app"), contents = join(app, "Contents"), binary = join(contents, "MacOS", "Jase Tunnel"); mkdirSync(join(contents, "MacOS"), { recursive: true });

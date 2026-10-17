@@ -110,7 +110,7 @@ func chooseBrowser(ctx context.Context, names []string) string {
 			items = append(items, "'"+strings.ReplaceAll(name, "'", "''")+"'")
 		}
 		script := `Add-Type -AssemblyName System.Windows.Forms; $form=New-Object Windows.Forms.Form; $form.Text='Jase Tunnel'; $form.Width=350; $form.Height=170; $label=New-Object Windows.Forms.Label; $label.Text='Apri Jase con quale browser?'; $label.SetBounds(20,15,300,25); $list=New-Object Windows.Forms.ComboBox; $list.SetBounds(20,45,290,25); $list.DropDownStyle='DropDownList'; $list.Items.AddRange(@(` + strings.Join(items, ",") + `)); $list.SelectedIndex=0; $button=New-Object Windows.Forms.Button; $button.Text='Apri Jase'; $button.SetBounds(200,80,110,30); $button.DialogResult='OK'; $form.Controls.AddRange(@($label,$list,$button)); $form.AcceptButton=$button; if($form.ShowDialog() -eq 'OK'){Write-Output $list.SelectedItem}`
-		command = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"+script)
+		command = exec.CommandContext(ctx, "powershell.exe", "-STA", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"+script)
 	default:
 		if path, err := exec.LookPath("zenity"); err == nil {
 			args := []string{"--list", "--title=Jase Tunnel", "--text=Apri Jase con quale browser?", "--column=Browser"}
@@ -125,6 +125,7 @@ func chooseBrowser(ctx context.Context, names []string) string {
 	if command == nil {
 		return ""
 	}
+	hideChildConsole(command)
 	output, err := command.Output()
 	if err != nil {
 		return ""
@@ -145,7 +146,7 @@ func pickModel(ctx context.Context, folder bool) (string, error) {
 		if folder {
 			script = `Add-Type -AssemblyName System.Windows.Forms; $dialog=New-Object Windows.Forms.FolderBrowserDialog; $dialog.Description='Scegli la cartella dei pesi per Jase Tunnel'; if($dialog.ShowDialog() -eq 'OK'){Write-Output $dialog.SelectedPath}`
 		}
-		command = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"+script)
+		command = exec.CommandContext(ctx, "powershell.exe", "-STA", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"+script)
 	default:
 		if path, err := exec.LookPath("zenity"); err == nil {
 			args := []string{"--file-selection", "--title=Scegli i pesi per Jase Tunnel"}
@@ -166,6 +167,7 @@ func pickModel(ctx context.Context, folder bool) (string, error) {
 	if command == nil {
 		return "", errors.New("Il selettore file richiede Zenity o KDialog su Linux. Puoi importare il modello nel tuo motore locale e Jase lo rileverà automaticamente.")
 	}
+	hideChildConsole(command)
 	output, err := command.Output()
 	if err != nil {
 		return "", errors.New("Selezione annullata.")

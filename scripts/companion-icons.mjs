@@ -2,6 +2,10 @@ import sharp from "sharp";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+export async function desktopIcon(source, target) {
+  await sharp(source, { density: 288 }).resize(256, 256).png().toFile(target);
+}
+
 // The website favicon is the only source of the app and menu-bar artwork.
 export async function companionIcons(source, resources, iconSet) {
   const svg = await readFile(source, "utf8");

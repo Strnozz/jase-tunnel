@@ -23,3 +23,9 @@ jobs:
           cache: false
       - name: Check transport, model adapters and privacy boundaries
         run: go test -race ./...
+      - name: Prepare Linux desktop checks
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-0t64 libayatana-appindicator3-1 xvfb dbus-x11
+      - name: Exercise native Linux panel
+        if: runner.os == 'Linux'
+        run: dbus-run-session -- xvfb-run -a env JASE_DESKTOP_SMOKE=1 G_DEBUG=fatal-criticals go test -run TestLinuxDesktopSmoke -count=1 ./...

@@ -112,7 +112,7 @@ func TestNativeConnectionsAreDeduplicatedAndThinkingIsControllable(t *testing.T)
 func TestDesktopReuseRequiresMatchingBuildAndSiteMode(t *testing.T) {
 	previous := devBuild
 	t.Cleanup(func() { devBuild = previous })
-	state := desktopIdentity{Protocol: protocol, Desktop: true, DesktopUI: "appkit-v1", Version: version}
+	state := desktopIdentity{Protocol: protocol, Desktop: true, DesktopUI: desktopUIName, Version: version}
 	devBuild = "false"
 	if !currentDesktop(state) {
 		t.Fatal("matching release should focus its window")

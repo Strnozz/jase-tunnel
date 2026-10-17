@@ -18,7 +18,7 @@ type desktopIdentity struct {
 }
 
 func currentDesktop(state desktopIdentity) bool {
-	return state.Protocol == protocol && state.Desktop && state.DesktopUI == "appkit-v1" && state.Version == version && state.Development == (devBuild == "true")
+	return state.Protocol == protocol && state.Desktop && state.DesktopUI == desktopUIName && state.Version == version && state.Development == (devBuild == "true")
 }
 
 // Opening Jase twice focuses its existing window. An invisible older version can

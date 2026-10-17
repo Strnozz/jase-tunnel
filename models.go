@@ -494,6 +494,7 @@ func (a *application) importModelAt(ctx context.Context, file string, folder boo
 	defer os.Remove(modelfile)
 	name := "jase-local-" + randomSecret()[:12]
 	command := exec.CommandContext(ctx, engine, "create", name, "-f", modelfile)
+	hideChildConsole(command)
 	command.Env = append(os.Environ(), "OLLAMA_HOST=127.0.0.1:11434", "OLLAMA_NO_CLOUD=1")
 	if err = command.Run(); err != nil {
 		return errors.New("Importazione non riuscita. Verifica che Ollama sia aperto e che supporti questo modello.")

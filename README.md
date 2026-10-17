@@ -14,21 +14,37 @@ La prima proposta del flusso e del protocollo per piattaforme indipendenti è in
 
 - Motore Go per Windows, macOS e Linux, su Intel/AMD e ARM.
 - Interfaccia macOS nativa AppKit, icona dell’app derivata dal favicon e J bianca nella barra dei menu.
+- Interfaccia Windows nativa Win32, J nell’area di notifica, doppio clic per aprire il pannello e tasto destro per il menu.
+- Interfaccia Linux nativa GTK 3, con supporto AppIndicator o icona GTK nei desktop compatibili.
 - Menu con **Apri Jase Tunnel**, **Aggiungi pesi** e **Chiudi Jase Tunnel**.
 - Rilevamento di Ollama, LM Studio e dei file nei percorsi predefiniti dei modelli; selezione manuale di altri pesi.
 - Associazione alla sessione del browser senza account e comunicazione diretta con il server Jase.
-- Stato dei collegamenti e registro locale di invii, ricezioni e inferenze nel pannello macOS.
+- Stato dei collegamenti e registro locale di invii, ricezioni e inferenze sui tre sistemi, con filtri e dettagli selezionabili.
 - Test del trasporto, degli adattatori dei modelli e dei confini di riservatezza.
 
-Su Windows e Linux resta l’interfaccia locale nel browser; il pannello nativo e la barra dei menu descritti sopra sono disponibili su macOS. Ollama o LM Studio devono essere installati e attivi: i motori e i pesi non sono inclusi.
+Su tutti e tre i sistemi l’app apre il pannello e rimane riconoscibile mentre lavora in background. La voce **Chiudi Jase Tunnel** termina anche il servizio e le inferenze del tunnel, lasciando aperti Ollama e LM Studio. Riaprire l’eseguibile porta in primo piano l’istanza già avviata. L’interfaccia legge il registro direttamente nello stesso processo: non lo espone al browser.
+
+Su Windows l’icona compare nell’area di notifica vicino all’orologio; Windows può raggrupparla nel menu delle icone nascoste. Il doppio clic apre il pannello e il tasto destro mostra le stesse tre voci del Mac. Chiudere la finestra mantiene il tunnel e l’icona attivi. L’icona viene ripristinata se Esplora risorse si riavvia.
+
+Su Linux occorre GTK 3 (pacchetto `libgtk-3-0` o `libgtk-3-0t64` su Ubuntu/Debian). L’app usa Ayatana AppIndicator, se installato, oppure l’icona GTK tradizionale. Il desktop deve supportare le icone di notifica: se non esiste un’area di notifica disponibile, chiudere la finestra la riduce a icona mantenendola raggiungibile dalla barra applicazioni. Non viene nascosta senza un modo per riaprirla.
+
+Ollama o LM Studio devono essere installati e attivi: i motori e i pesi non sono inclusi.
 
 ## Sviluppo
 
-Il motore usa soltanto la libreria standard Go. I test si eseguono con Go 1.27.2 e un compilatore C per il rilevamento delle race:
+Il motore e la UI Windows usano la libreria standard Go e le API del sistema. La UI Linux usa `purego` per caricare GTK senza CGO; la versione è fissata in `go.mod`/`go.sum` e la licenza è in `third_party/`. Go minimo: 1.25; toolchain verificata: 1.27.2. Al primo avvio dello sviluppo scaricare la dipendenza di compilazione:
+
+```sh
+go mod download
+```
+
+I test con rilevamento delle race richiedono un compilatore C:
 
 ```sh
 go test -race ./...
 ```
+
+Il workflow include anche una prova del pannello GTK in una sessione Linux virtuale con Xvfb e verifiche delle API native Windows. Le prove specifiche di un sistema si eseguono sul relativo runner, non attraverso la compilazione incrociata su Mac.
 
 Su macOS servono anche gli Xcode Command Line Tools per l’interfaccia AppKit. Per avviare una prova isolata con un sito Jase già aperto in locale:
 
@@ -70,6 +86,7 @@ La versione ordinaria accetta `https://jaseengine.it`; `--dev` abilita anche le 
 | --- | --- |
 | `*.go`, `desktop_darwin.m` | Motore, adattatori, interfaccia nativa e test |
 | `assets/icon.svg` | Favicon sorgente delle icone |
+| `assets/desktop-icon.png` | Icona derivata dal favicon, incorporata negli eseguibili Windows/Linux |
 | `scripts/` | Compilazione, generazione icone e test |
 | `.github/workflows/check.yml` | Verifiche su Windows, macOS e Linux nel futuro repository |
 | `VERSION` | Versione dell’app |

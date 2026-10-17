@@ -1,5 +1,13 @@
 # Collegamento attuale e direzione del progetto
 
+## Interfacce desktop
+
+macOS usa AppKit, Windows le API Win32 e Linux GTK 3, caricata da `purego`. Il motore e il pannello restano nello stesso processo. Modelli, stato, contatori, filtri, dettaglio degli eventi e preferenze di debug/ragionamento sono disponibili anche sui nuovi pannelli. Tutti leggono copie dello stato prive di token o percorsi dei pesi; il registro non ha API HTTP.
+
+Il menu dell’icona contiene Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Windows apre la finestra con doppio clic e il menu con tasto destro. La chiusura della sola finestra lascia il servizio nell’area di notifica; su Linux senza un’icona effettivamente ospitata dal desktop, la finestra viene soltanto minimizzata. Uscire dall’app annulla il motore e le inferenze. Le importazioni mantengono lo stesso blocco usato dalle richieste del sito.
+
+L’identità del pannello nello stato locale è `appkit-v1`, `win32-v1` o `gtk3-v1`: il riavvio dell’eseguibile riapre l’istanza con la stessa versione e modalità. Una versione differente richiede la conferma di riavvio già prevista.
+
 ## Componenti
 
 1. La pagina Jase ottiene un ticket di associazione legato alla sessione anonima del browser e alla sua origine.
@@ -18,7 +26,7 @@ Il protocollo corrente è `jase-companion-v1`. L’identità della sessione non 
 | `POST /v1/pair` | Associazione con ticket e origine |
 | `POST /v1/add-model` | Selettore locale di file o cartella |
 | `POST /v1/import-model` | Importazione di un file rilevato, tramite identificativo |
-| `POST /v1/show-window` | Apertura del pannello nativo macOS |
+| `POST /v1/show-window` | Apertura del pannello nativo del sistema |
 | `POST /v1/open-jase` | Apertura di Jase nel browser scelto |
 | `POST /v1/quit` | Chiusura dell’app |
 

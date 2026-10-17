@@ -1,10 +1,13 @@
-//go:build !darwin || !cgo
+//go:build (darwin && !cgo) || (!darwin && !windows && !linux)
 
 package main
 
 import "log"
 
 const desktopAvailable = false
+const desktopUIName = ""
+
+func prepareDesktopUI() error { return nil }
 
 func (*application) runDesktopUI()       {}
 func showDesktopUI()                     {}

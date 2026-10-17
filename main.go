@@ -1,4 +1,4 @@
-// Jase's desktop companion. Standard library only; no cloud SDK or outside relay.
+// Jase's desktop companion. No cloud SDK or outside relay.
 package main
 
 import (
@@ -78,11 +78,17 @@ func main() {
 	think := flag.Bool("think", false, "Let models that declare the thinking capability reason before answering")
 	dev := flag.Bool("dev", false, "Also accept http://localhost sites (local development of Jase)")
 	site := flag.String("site", "https://jaseengine.it", "Jase site opened by the app")
-	headless := flag.Bool("headless", false, "Run without the macOS interface (explicit terminal diagnostics only)")
+	headless := flag.Bool("headless", false, "Run without the desktop interface (explicit terminal diagnostics only)")
 	flag.Parse()
 	if runtime.GOOS == "darwin" && !*headless && !desktopAvailable {
 		log.Print("The macOS app requires AppKit: build on macOS with CGO_ENABLED=1, or use --headless for diagnostics")
 		return
+	}
+	if desktopAvailable && !*headless {
+		if err := prepareDesktopUI(); err != nil {
+			desktopStartupError(err.Error())
+			return
+		}
 	}
 	if *dev {
 		devBuild = "true"
@@ -312,7 +318,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.mu.RUnlock()
 		ui := ""
 		if a.nativeUI {
-			ui = "appkit-v1"
+			ui = desktopUIName
 		}
 		respond(w, 200, map[string]any{"protocol": protocol, "version": version, "modelCount": count, "files": files, "connectionIds": connectionIDs, "desktop": a.nativeUI, "desktopUI": ui, "development": devBuild == "true"})
 		return
