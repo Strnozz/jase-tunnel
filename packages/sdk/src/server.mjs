@@ -11,7 +11,7 @@ const COOKIE = 'jase_tunnel', AGE = 30 * 60_000;
 const secret = () => randomBytes(32).toString('hex');
 const hash = v => createHash('sha256').update(v).digest('hex');
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers } });
-const failure = (status, code, message) => json({ error: { code, message } }, status);
+const failure = (status, code, message, headers = {}) => json({ error: { code, message } }, status, headers);
 const browserToken = request => {
   const token = request.headers.get('cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
   return /^[a-f0-9]{64}$/.test(token ?? '') ? token : undefined;
@@ -45,6 +45,20 @@ const body = (request, max = 64_000) => {
 };
 export function defineSite(options = {}) { return new TunnelSite(options); }
 
+// Admission limits per minute. Requests without the module's cookie (a first visit, the
+// desktop app pairing) are limited per client address when it is known, and together
+// under a larger shared budget, so one client cannot lock everybody else out.
+const LIMITS = { browser: 40, address: 20, anonymous: 600, pairAddress: 20, pair: 600 };
+// The address of the client: given by the Node adapter (the socket), or taken from the
+// reverse proxy's headers when the site says it sits behind one (trustProxy).
+function clientAddress(request, info, trustProxy) {
+  if (trustProxy) {
+    const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip')?.trim();
+    if (forwarded) return forwarded.slice(0, 64);
+  }
+  return typeof info?.clientAddress === 'string' && info.clientAddress ? info.clientAddress.slice(0, 64) : undefined;
+}
+
 export class TunnelSite {
   constructor(options = {}) {
     this.name = options.name ?? 'Questo servizio';
@@ -54,10 +68,26 @@ export class TunnelSite {
     if (this.name.length > 80) throw new Error('Nome del servizio troppo lungo.');
     this.options = options;
     this.broker = options.broker ?? new TunnelBroker();
-    this.grants = new Map(); this.chats = new Map(); this.pending = new Map(); this.busy = new Set(); this.tickets = new Map(); this.completed = new Map();
-    this.limiter = new WindowLimiter(40, 60_000, 10_000);
-    this.identities = new WindowLimiter(200, 60_000, 1);
+    this.trustProxy = options.trustProxy ?? process.env.JASE_TUNNEL_TRUST_PROXY === 'true';
+    this.grants = new Map();
+    this.chats = new Map();
+    this.pending = new Map();
+    this.busy = new Set();
+    this.tickets = new Map();
+    this.completed = new Map();
+    this.limiter = new WindowLimiter(LIMITS.browser, 60_000, 10_000);
+    this.addresses = new WindowLimiter(LIMITS.address, 60_000, 50_000);
+    this.identities = new WindowLimiter(LIMITS.anonymous, 60_000, 1);
+    this.pairAddresses = new WindowLimiter(LIMITS.pairAddress, 60_000, 50_000);
+    this.pairs = new WindowLimiter(LIMITS.pair, 60_000, 1);
     this.catalog = new TunnelReleaseCatalog();
+    // A static list is checked now: a tool without authorize or public stops the server
+    // at startup instead of failing during a visitor's conversation.
+    if (Array.isArray(options.tools)) toolList(options.tools);
+  }
+  // Seconds to wait before an anonymous request (no module cookie) is admitted, or 0.
+  admitAnonymous(address, perAddress, shared) {
+    return (address ? perAddress.take(address) : 0) || shared.take('all');
   }
   manifest() {
     return json({ name: this.name, protocols: [TUNNEL_PROTOCOL], broker: this.path, requirements: { capabilities: ['chat', 'tool-calls'], contextTokens: 2048 } });
@@ -74,7 +104,8 @@ export class TunnelSite {
     const values = typeof this.options.tools === 'function' ? await this.options.tools({ request, signal: request.signal }) : this.options.tools ?? [];
     return toolList(values);
   }
-  async handle(request) {
+  /** info.clientAddress: the client's IP address, when the adapter knows it. */
+  async handle(request, info = {}) {
     try {
       this.prune();
       const url = new URL(request.url), action = url.pathname.slice(this.path.length);
@@ -86,7 +117,11 @@ export class TunnelSite {
         const channel = process.env.NODE_ENV === 'development' ? 'development' : 'stable';
         const release = await this.catalog.load(channel);
         // Older desktop packages cannot receive the announcements of the pages people visit.
-        if (release.version && !/^(?:dev-)?v(?:0\.(?:[3-9]|\d{2,})\.|[1-9]\d*\.)/.test(release.version)) return url.searchParams.get('manifest') === '1' ? json({ ...release, status:'not-published', message:'Serve Jase Tunnel 0.3.0 o successivo. La nuova versione deve ancora essere pubblicata.', downloads:release.downloads.map(d=>({...d,available:false,url:undefined})) }) : failure(503,'upgrade_required','Serve Jase Tunnel 0.3.0 o successivo.');
+        if (release.version && !/^(?:dev-)?v(?:0\.(?:[3-9]|\d{2,})\.|[1-9]\d*\.)/.test(release.version)) {
+          if (url.searchParams.get('manifest') !== '1') return failure(503, 'upgrade_required', 'Serve Jase Tunnel 0.3.0 o successivo.');
+          const downloads = release.downloads.map(d => ({ ...d, available: false, url: undefined }));
+          return json({ ...release, status: 'not-published', message: 'Serve Jase Tunnel 0.3.0 o successivo. La nuova versione deve ancora essere pubblicata.', downloads });
+        }
         if (url.searchParams.get('manifest') === '1') return json(release);
         const asset = release.downloads.find(a => a.id === url.searchParams.get('target') && a.available);
         return asset?.url ? new Response(null, { status: 302, headers: { Location: asset.url, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } }) : failure(503, 'release_unavailable', release.message ?? 'Download non disponibile.');
@@ -94,7 +129,10 @@ export class TunnelSite {
       if (action === 'session' && request.method === 'GET') return json({ protocol: TUNNEL_PROTOCOL, ...this.broker.browserState(browser), models: this.broker.models(browser) });
       if (['tickets', 'disconnect', 'chat', 'confirm'].includes(action) && request.method === 'POST') {
         const origin = originFor(request, this.origin);
-        if (this.limiter.take(browser ? hash(browser) : 'anonymous') || !browser && this.identities.take('all')) return failure(429, 'rate_limited', 'Attendi un minuto e riprova.');
+        const wait = browser
+          ? this.limiter.take(hash(browser))
+          : this.admitAnonymous(clientAddress(request, info, this.trustProxy), this.addresses, this.identities);
+        if (wait) return failure(429, 'rate_limited', 'Attendi un minuto e riprova.', { 'Retry-After': String(wait) });
         if (typeof this.options.authorize === 'function' && await this.options.authorize(request) !== true) return failure(403, 'not_authorized', 'Accesso non autorizzato.');
         if (action === 'tickets') {
           const input = await body(request);
@@ -105,7 +143,9 @@ export class TunnelSite {
           return json({ protocol: TUNNEL_PROTOCOL, ticket, expiresAt }, 200, { 'Set-Cookie': `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=1800${origin.startsWith('https:') ? '; Secure' : ''}` });
         }
         if (action === 'disconnect') {
-          this.broker.disconnect(browser); this.chats.delete(hash(browser ?? '')); this.pending.delete(hash(browser ?? ''));
+          this.broker.disconnect(browser);
+          this.chats.delete(hash(browser ?? ''));
+          this.pending.delete(hash(browser ?? ''));
           for (const [token, grant] of this.grants) if (grant.browser === browser) this.grants.delete(token);
           return json({ ok: true });
         }
@@ -115,7 +155,8 @@ export class TunnelSite {
       // Desktop-only broker routes never accept a browser Origin or grant CORS.
       if (request.headers.has('origin')) return failure(403, 'origin_rejected', 'Richiesta non consentita.');
       if (action === 'pair' && request.method === 'POST') {
-        if (this.identities.take('all')) return failure(429, 'rate_limited', 'Attendi e riprova.');
+        const wait = this.admitAnonymous(clientAddress(request, info, this.trustProxy), this.pairAddresses, this.pairs);
+        if (wait) return failure(429, 'rate_limited', 'Attendi e riprova.', { 'Retry-After': String(wait) });
         const input = await body(request);
         if (input.protocol !== TUNNEL_PROTOCOL || !/^[a-f0-9]{64}$/.test(input.ticket ?? '') || !Array.isArray(input.models) || input.models.length !== 1) return failure(400, 'invalid_request', 'Associazione non valida.');
         const ticket = this.tickets.get(hash(input.ticket));
@@ -138,15 +179,29 @@ export class TunnelSite {
       if (action === 'active' && request.method === 'GET') return json({ active: this.broker.active(token, url.searchParams.get('id') ?? '') });
       if (action === 'result' && request.method === 'POST') {
         const input = await body(request, 150_000);
-        if (!/^[a-f0-9]{64}$/.test(input.id ?? '') || !input.result || typeof input.result!=='object') return failure(400,'invalid_request','Turno o risultato non valido.');
-        const key = hash(token)+':'+input.id, fingerprint=hash(JSON.stringify(input.result)), previous=this.completed.get(key);
-        if (previous) return previous.fingerprint===fingerprint ? json({ok:true}) : failure(409,'result_conflict','Questo turno ha già una risposta.');
+        if (!/^[a-f0-9]{64}$/.test(input.id ?? '') || !input.result || typeof input.result !== 'object') {
+          return failure(400, 'invalid_request', 'Turno o risultato non valido.');
+        }
+        // A retried delivery of the same answer is accepted once more; a different
+        // answer for a turn already answered is a conflict.
+        const key = hash(token) + ':' + input.id;
+        const fingerprint = hash(JSON.stringify(input.result));
+        const previous = this.completed.get(key);
+        if (previous) {
+          return previous.fingerprint === fingerprint ? json({ ok: true }) : failure(409, 'result_conflict', 'Questo turno ha già una risposta.');
+        }
         this.broker.result(token, input.id, input.result);
-        if(this.completed.size>=2000)this.completed.delete(this.completed.keys().next().value);
-        this.completed.set(key,{fingerprint,expiresAt:grant.expiresAt});return json({ok:true});
+        if (this.completed.size >= 2000) this.completed.delete(this.completed.keys().next().value);
+        this.completed.set(key, { fingerprint, expiresAt: grant.expiresAt });
+        return json({ ok: true });
       }
-      if (action === 'models' && request.method === 'POST') return json({ ok: true }); // A grant stays pinned to its selected model.
-      if (action === 'revoke' && request.method === 'POST') { this.broker.revoke(token); this.grants.delete(hash(token)); return json({ ok: true }); }
+      // A grant stays pinned to its selected model.
+      if (action === 'models' && request.method === 'POST') return json({ ok: true });
+      if (action === 'revoke' && request.method === 'POST') {
+        this.broker.revoke(token);
+        this.grants.delete(hash(token));
+        return json({ ok: true });
+      }
       return failure(404, 'not_found', 'Risorsa non trovata.');
     } catch (error) {
       if (request.signal.aborted) return new Response(null, { status: 499 });

@@ -30,7 +30,13 @@ function generated(entries, typescript=true) {
     if (!/^[A-Za-z_$][\w$]*$/.test(t.export) || (t.path??[]).some(p=>['__proto__','constructor','prototype'].includes(p))) throw new Error('Riferimento allo strumento non valido.');
     imports.push(`import { ${t.export} as tool${index} } from ${JSON.stringify(path)};`);
     const access=(t.path??[]).map(p=>`[${JSON.stringify(p)}]`).join('');
-    const options={name:t.name,...(t.description?{description:t.description}:{}),...(t.parameters?{parameters:t.parameters}:{}),...(t.readOnly===true?{readOnly:true}:{})};
+    const options={
+      name:t.name,
+      ...(t.description?{description:t.description}:{}),
+      ...(t.parameters?{parameters:t.parameters}:{}),
+      ...(t.readOnly===true?{readOnly:true}:{}),
+      ...(t.public===true?{public:true}:{}),
+    };
     bindings.push(`  { tool: tool${index}${access}, options: ${JSON.stringify(options)} }`);
   });
   return marker+imports.join('\n')+'\nexport const tools = [\n'+bindings.join(',\n')+'\n];\n';
@@ -58,7 +64,11 @@ function toolChanges(tools,typescript=true) {
 function mergeScan() {
   const scan=discoverTools(root), saved=registry();
   if(saved.version!==1 || !Array.isArray(saved.tools)) throw new Error('Registro strumenti non valido.');
-  const tools=[...saved.tools.filter(t=>t.manual),...scan.tools.map(t=>({...t,enabled:saved.tools.find(old=>!old.manual && old.name===t.name)?.enabled??true}))];
+  // A newly found tool starts disabled; choices already made (enable, public, read-only) stay.
+  const tools=[...saved.tools.filter(t=>t.manual),...scan.tools.map(t=>{
+    const old=saved.tools.find(o=>!o.manual && o.name===t.name);
+    return {...t,enabled:old?.enabled??false,...(old?.public?{public:true}:{}),...(old?.readOnly?{readOnly:true}:{})};
+  })];
   if(new Set(tools.map(t=>t.name)).size!==tools.length) throw new Error('Nomi strumenti duplicati nel registro.');
   scan.warnings.forEach(w=>console.warn(w));
   return tools;
@@ -168,6 +178,28 @@ function pageChanges() {
   }
   return changes;
 }
+// The broker keeps pending requests in the memory of one process: serverless functions
+// and several workers lose them between requests.
+function serverlessHosts(pkg) {
+  const found=[];
+  const has=file=>existsSync(join(root,file));
+  const depends=name=>Object.keys({...pkg.dependencies,...pkg.devDependencies}).some(d=>d===name||d.startsWith(name+'/'));
+  if(has('vercel.json')||has('.vercel')) found.push('Vercel');
+  if(has('netlify.toml')||depends('@netlify')) found.push('Netlify');
+  if(has('wrangler.toml')||has('wrangler.json')||has('wrangler.jsonc')||depends('@opennextjs')) found.push('Cloudflare Workers');
+  if(has('serverless.yml')||has('serverless.yaml')||has('sst.config.ts')||has('amplify.yml')) found.push('funzioni serverless');
+  return found;
+}
+function toolSummary(tools) {
+  const enabled=tools.filter(t=>t.enabled!==false), waiting=tools.filter(t=>t.enabled===false);
+  const lines=[`Jase Tunnel: ${tools.length} strumenti nel registro, ${enabled.length} abilitati.`];
+  if(waiting.length) lines.push(`Da valutare (disabilitati): ${waiting.map(t=>t.name).join(', ')}.`);
+  lines.push('Attenzione: il modello gira sul computer del visitatore, quindi è il visitatore a decidere quali strumenti chiamare e con quali argomenti.',
+    'Abilita solo gli strumenti che controllano la sessione con authorize(context, args) o che sono sicuri per chiunque:',
+    '  npx jase-tunnel tools enable <nome>             (lo strumento ha authorize)',
+    '  npx jase-tunnel tools enable <nome> --public    (sicuro per qualsiasi visitatore)');
+  return lines.join('\n');
+}
 function init() {
   if(!existsSync(pkgFile)) throw new Error('Apri il terminale nella cartella del progetto Node.js.');
   const pkg=JSON.parse(readFileSync(pkgFile,'utf8'));
@@ -222,7 +254,9 @@ function init() {
     if(result.error||result.status!==0) throw new Error('Installazione dipendenza non completata. Nessun file del progetto è stato modificato. Riprova init --package <pacchetto>.');
   }
   if(!flag('--dry-run')) commitFiles(changes);
-  console.log(`Jase Tunnel: ${tools.length} strumenti rilevati. ${summary}\nI visitatori con Jase Tunnel aperto vengono avvisati quando visitano le tue pagine.\nScansione aggiornata: npx jase-tunnel tools scan\nAggiunta manuale: npx jase-tunnel tools add ./src/tools.ts#strumento`);
+  console.log(`${summary}\nI visitatori con Jase Tunnel aperto vengono avvisati quando visitano le tue pagine.\n\n${toolSummary(tools)}\n\nScansione aggiornata: npx jase-tunnel tools scan\nAggiunta manuale: npx jase-tunnel tools add ./src/tools.ts#strumento [--public]`);
+  const hosts=serverlessHosts(pkg);
+  if(hosts.length) console.warn(`\nAttenzione: configurazione per ${hosts.join(', ')} rilevata. Il broker di Jase Tunnel tiene le richieste nella memoria di un solo processo Node: con funzioni serverless o più istanze i collegamenti non funzionano. Serve un server Node persistente con una sola istanza (o affinità delle richieste).`);
 }
 try {
   const command=args[0];
@@ -230,19 +264,26 @@ try {
   else if(command==='tools') {
     const operation=args[1];
     if(operation==='list') console.log(JSON.stringify(registry().tools,null,2));
-    else if(operation==='scan') { const tools=mergeScan(); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); console.log(`${tools.length} strumenti registrati.`); }
+    else if(operation==='scan') { const tools=mergeScan(); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); console.log(toolSummary(tools)); }
     else if(operation==='add') {
       const reference=args[2]??'', split=reference.lastIndexOf('#'); if(split<1) throw new Error('Usa tools add ./percorso.ts#export [--name nome] [--schema ./schema.json] [--description testo]');
       const file=inside(resolve(root,reference.slice(0,split))), exported=reference.slice(split+1);
       if(!existsSync(file)) throw new Error('Modulo non trovato.');
       const names=exported.split('.'), name=option('--name')??names.at(-1).replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
       if(!/^[a-z][a-z0-9_]{1,40}$/.test(name)) throw new Error('Nome strumento non valido.');
-      const entry={name,file:relative(root,file).split(sep).join('/'),export:names[0],path:names.slice(1),manual:true,enabled:true};
+      const entry={name,file:relative(root,file).split(sep).join('/'),export:names[0],path:names.slice(1),manual:true,enabled:true,...(flag('--public')?{public:true}:{})};
       if(option('--schema')) entry.parameters=JSON.parse(readFileSync(inside(resolve(root,option('--schema'))),'utf8'));
       if(option('--description')) entry.description=option('--description');
       if(flag('--read-only')) entry.readOnly=true;
-      const saved=registry().tools.filter(t=>t.name!==name); saved.push(entry); commitFiles(toolChanges(saved,existsSync(join(root,'tsconfig.json')))); console.log(`Aggiunto ${name}.`);
+      const saved=registry().tools.filter(t=>t.name!==name); saved.push(entry); commitFiles(toolChanges(saved,existsSync(join(root,'tsconfig.json'))));
+      console.log(`Aggiunto ${name}.${entry.public?' Chiamabile da qualsiasi visitatore.':' Se lo strumento non ha authorize(context, args), il server lo rifiuterà all’avvio: aggiungilo o usa --public.'}`);
+    } else if(operation==='enable') {
+      const tools=registry().tools, entry=tools.find(t=>t.name===args[2]);
+      if(!entry) throw new Error(`Strumento non trovato: ${args[2]??''}. Elenco: npx jase-tunnel tools list`);
+      if(!flag('--public') && !entry.public && entry.authorize===false) throw new Error(`${entry.name} non ha authorize(context, args): qualsiasi visitatore potrebbe chiamarlo con argomenti a sua scelta. Aggiungi authorize e ripeti tools scan, oppure usa --public se è sicuro per chiunque.`);
+      const updated=tools.map(t=>t===entry?{...t,enabled:true,...(flag('--public')?{public:true}:{}),...(flag('--read-only')?{readOnly:true}:{})}:t);
+      commitFiles(toolChanges(updated,existsSync(join(root,'tsconfig.json')))); console.log(`Abilitato ${entry.name}.`);
     } else if(operation==='remove') { const tools=registry().tools.map(t=>t.name===args[2]?{...t,enabled:false}:t); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); }
-    else throw new Error('Usa tools scan, list, add o remove.');
-  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <pacchetto o tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name nome] [--schema ./schema.json] [--description testo] [--read-only]\n  tools remove nome');
+    else throw new Error('Usa tools scan, list, add, enable o remove.');
+  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <pacchetto o tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name nome] [--schema ./schema.json] [--description testo] [--read-only] [--public]\n  tools enable nome [--public] [--read-only]\n  tools remove nome');
 } catch(error) { console.error(`Jase Tunnel: ${error.message}`); process.exitCode=1; }

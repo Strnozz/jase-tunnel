@@ -63,7 +63,8 @@ export function discoverTools(project) {
             const name = nameNode && ts.isStringLiteral(nameNode) ? nameNode.text : fallback.replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase().replace(/[^a-z0-9_]/g,'_');
             if (!/^[a-z][a-z0-9_]{1,40}$/.test(name)) { warnings.push(`${relative(root,path)}#${exported}: nome strumento non riconoscibile.`); return; }
             if (!description) { warnings.push(`${relative(root,path)}#${exported}: manca la descrizione.`); return; }
-            found.push({ name, file: relative(root,path).split(sep).join('/'), export: exported, path: pathParts, kind, enabled: true }); return;
+            // Found is not enabled: the owner decides which tools visitors may call.
+            found.push({ name, file: relative(root,path).split(sep).join('/'), export: exported, path: pathParts, kind, authorize: !!property(shape,'authorize'), enabled: false }); return;
           }
           // Inspect only exported tool collections, never arbitrary application objects.
           if (/tools$/i.test(exported)) for (const p of shape.properties) {

@@ -79,41 +79,64 @@ func localJSON(ctx context.Context, base, path string, input, output any, maximu
 	}
 	return json.Unmarshal(raw, output)
 }
+
+// How long the models of an engine that stopped answering stay listed. A busy engine
+// (a long inference on a laptop) can miss one refresh: that must not end a grant or
+// empty the consent dialog. An engine that is really closed disappears after this.
+var engineGrace = 90 * time.Second
+
 func (a *application) refreshModels() {
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()
-	models := []model{}
-	var mu sync.Mutex
+	a.mu.RLock()
+	previous := append([]model{}, a.models...)
+	a.mu.RUnlock()
+	var ollama, studio []model
+	var ollamaOK, studioOK bool
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		found := ollamaModels(ctx)
-		mu.Lock()
-		models = append(models, found...)
-		mu.Unlock()
-	}()
-	go func() {
-		defer wg.Done()
-		found := studioModels(ctx)
-		mu.Lock()
-		models = append(models, found...)
-		mu.Unlock()
-	}()
+	go func() { defer wg.Done(); ollama, ollamaOK = ollamaModels(ctx, previous) }()
+	go func() { defer wg.Done(); studio, studioOK = studioModels(ctx) }()
 	wg.Wait()
+	files := scanModelFiles(defaultModelDirectories())
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.engineSeen == nil {
+		a.engineSeen = map[string]time.Time{}
+	}
+	models := []model{}
+	for _, engine := range []struct {
+		name  string
+		found []model
+		ok    bool
+	}{{"ollama", ollama, ollamaOK}, {"lmstudio", studio, studioOK}} {
+		if engine.ok {
+			a.engineSeen[engine.name] = now
+			models = append(models, engine.found...)
+			continue
+		}
+		if seen := a.engineSeen[engine.name]; !seen.IsZero() && now.Sub(seen) < engineGrace {
+			for _, m := range previous {
+				if m.Engine == engine.name {
+					models = append(models, m)
+				}
+			}
+		}
+	}
 	sort.Slice(models, func(i, j int) bool {
 		if models[i].Engine != models[j].Engine {
 			return models[i].Engine < models[j].Engine
 		}
 		return models[i].Key < models[j].Key
 	})
-	files := scanModelFiles(defaultModelDirectories())
-	a.mu.Lock()
 	a.models = models
 	a.files = files
-	a.mu.Unlock()
 }
-func ollamaModels(ctx context.Context) []model {
+
+// ollamaModels lists Ollama's local models; ok is false when Ollama did not answer.
+// A model whose details time out keeps the entry of the previous refresh.
+func ollamaModels(ctx context.Context, previous []model) ([]model, bool) {
 	var list struct {
 		Models []struct {
 			Name        string `json:"name"`
@@ -126,7 +149,13 @@ func ollamaModels(ctx context.Context) []model {
 	err := localJSON(short, ollamaURL, "/api/tags", nil, &list, 1000000)
 	cancel()
 	if err != nil {
-		return nil
+		return nil, false
+	}
+	known := map[string]model{}
+	for _, m := range previous {
+		if m.Engine == "ollama" {
+			known[m.Key] = m
+		}
 	}
 	result := make([]model, 0)
 	var mu sync.Mutex
@@ -157,7 +186,15 @@ func ollamaModels(ctx context.Context) []model {
 			call, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 			err := localJSON(call, ollamaURL, "/api/show", map[string]string{"model": name}, &info, 1000000)
 			cancel()
-			if err != nil || info.RemoteHost != "" || info.RemoteModel != "" {
+			if err != nil {
+				if m, ok := known["ollama:"+name]; ok {
+					mu.Lock()
+					result = append(result, m)
+					mu.Unlock()
+				}
+				return
+			}
+			if info.RemoteHost != "" || info.RemoteModel != "" {
 				return
 			}
 			tools, thinks := false, false
@@ -186,9 +223,11 @@ func ollamaModels(ctx context.Context) []model {
 		}(item.Name, item.Size)
 	}
 	wg.Wait()
-	return result
+	return result, true
 }
-func studioModels(ctx context.Context) []model {
+
+// studioModels lists LM Studio's language models; ok is false when it did not answer.
+func studioModels(ctx context.Context) ([]model, bool) {
 	var list struct {
 		Models []struct {
 			Type         string `json:"type"`
@@ -204,7 +243,7 @@ func studioModels(ctx context.Context) []model {
 	short, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if localJSON(short, studioURL, "/api/v1/models", nil, &list, 1000000) != nil {
-		return nil
+		return nil, false
 	}
 	result := []model{}
 	for i, m := range list.Models {
@@ -222,7 +261,7 @@ func studioModels(ctx context.Context) []model {
 		}
 		result = append(result, model{Key: "lmstudio:" + m.Key, Name: m.Name, Engine: "lmstudio", SizeBytes: m.Size, ContextTokens: m.Context, Tools: m.Capabilities.Tools && m.Context >= 16384})
 	}
-	return result
+	return result, true
 }
 
 // Chat Completions cannot choose its context length. Reuse a sufficient loaded
@@ -360,9 +399,6 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		}
 		request["keep_alive"] = "5m"
 		request["options"] = map[string]any{"temperature": t.Temperature, "num_predict": t.MaxTokens, "num_ctx": t.ContextTokens}
-		if t.Schema != nil {
-			request["format"] = t.Schema
-		}
 		var response struct {
 			Message         map[string]any `json:"message"`
 			PromptEvalCount int            `json:"prompt_eval_count"`
@@ -401,9 +437,6 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		request["model"] = instance
 		request["temperature"] = t.Temperature
 		request["max_tokens"] = t.MaxTokens
-		if t.Schema != nil {
-			request["response_format"] = map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "jase_response", "schema": t.Schema}}
-		}
 		var response struct {
 			Choices []struct {
 				Message map[string]any `json:"message"`

@@ -44,6 +44,12 @@ test('CLI init configures Next.js, is repeatable, adds and removes tools and pre
  assert.equal(run('init','--skip-install').status,0);assert.ok(existsSync(join(root,'src/app/.well-known/jase-tunnel.json/route.ts')));
  const layout=readFileSync(join(root,'src/app/layout.tsx'),'utf8');assert.equal((layout.match(/<JaseTunnel/g)??[]).length,1);
  assert.equal(run('init','--skip-install').status,0);assert.equal(readFileSync(join(root,'src/app/layout.tsx'),'utf8'),layout);
+ const found=JSON.parse(readFileSync(join(root,'jase-tunnel.tools.json'))).tools;assert.equal(found[0].name,'catalog');assert.equal(found[0].enabled,false);
+ assert.doesNotMatch(readFileSync(join(root,'.jase-tunnel/tools.ts'),'utf8'),/catalog/);
+ const refused=run('tools','enable','catalog');assert.equal(refused.status,1);assert.match(refused.stderr,/authorize/);
+ assert.equal(run('tools','enable','catalog','--public').status,0);
+ assert.match(readFileSync(join(root,'.jase-tunnel/tools.ts'),'utf8'),/"public":true/);
+ assert.equal(run('tools','scan').status,0);assert.equal(JSON.parse(readFileSync(join(root,'jase-tunnel.tools.json'))).tools[0].enabled,true);
  assert.equal(run('tools','remove','catalog').status,0);assert.equal(run('tools','scan').status,0);assert.equal(JSON.parse(readFileSync(join(root,'jase-tunnel.tools.json'))).tools[0].enabled,false);
  assert.equal(run('tools','add','./src/tools/catalog.ts#catalog','--name','manual_catalog').status,0);
  const route=join(root,'src/app/api/jase-tunnel/v1/[...path]/route.ts');writeFileSync(route,'OWNER ROUTE');
@@ -58,7 +64,7 @@ test('schema and authorization checks run before an executor',async()=>{
 });
 
 test('two independent services keep sessions isolated and complete real tool round trips',async()=>{
- let reads=0;const tools=[defineTool({name:'inventory',description:'Read inventory',parameters:{type:'object',properties:{sku:{type:'string'}},required:['sku'],additionalProperties:false},readOnly:true,execute:({sku},ctx)=>{assert.equal(ctx.request.headers.get('cookie').startsWith('jase_tunnel='),true);reads++;return{sku,count:7};}})];
+ let reads=0;const tools=[defineTool({name:'inventory',description:'Read inventory',parameters:{type:'object',properties:{sku:{type:'string'}},required:['sku'],additionalProperties:false},readOnly:true,public:true,execute:({sku},ctx)=>{assert.equal(ctx.request.headers.get('cookie').startsWith('jase_tunnel='),true);reads++;return{sku,count:7};}})];
  const a=defineSite({name:'Shop A',origin,tools}),b=defineSite({name:'Shop B',origin,tools});
  const alice=await pair(a),bob=await pair(a),other=await pair(b);
  assert.equal((await b.handle(req('active',undefined,desktop(alice)))).status,401);
@@ -79,7 +85,7 @@ test('two independent services keep sessions isolated and complete real tool rou
 });
 
 test('tools with unknown effects require a one-use confirmation and are not run on discovery',async()=>{
- let writes=0;const site=defineSite({origin,tools:[{name:'update_order',description:'Update order',parameters:{type:'object'},execute:()=>++writes}]});
+ let writes=0;const site=defineSite({origin,tools:[{name:'update_order',description:'Update order',parameters:{type:'object'},public:true,execute:()=>++writes}]});
  assert.equal((await site.manifest().json()).protocols[0],TUNNEL_PROTOCOL);assert.equal(writes,0);
  const p=await pair(site),question=site.handle(req('chat',{model:p.model,message:'Update'},browser(p)));
  const task=await next(site,p);await reply(site,p,task,{content:'',toolCalls:[{name:'update_order',arguments:{}}]});
@@ -140,4 +146,35 @@ test('a grant revoked in the desktop app disappears from the browser session at 
  assert.equal((await site.handle(req('revoke',{},desktop(p)))).status,200);
  assert.equal((await (await site.handle(req('session',undefined,{cookie:p.cookie}))).json()).paired,false);
  assert.equal((await site.handle(req('poll',{},desktop(p)))).status,401);
+});
+
+test('a tool needs authorize or an explicit public declaration, checked at startup',()=>{
+ const open={name:'lookup',description:'Lookup',parameters:{type:'object'},execute:()=>1};
+ assert.throws(()=>adaptTool(open),/authorize/);
+ assert.throws(()=>defineSite({origin,tools:[open]}),/authorize/);
+ assert.equal(adaptTool(open,{public:true}).public,true);
+ assert.equal(adaptTool({...open,authorize:()=>true}).public,false);
+});
+
+test('anonymous requests are limited per client address, so one client cannot lock out the others',async()=>{
+ const site=defineSite({origin,tools:[]});
+ const ticket=address=>site.handle(req('tickets',{protocol:TUNNEL_PROTOCOL},{origin}),{clientAddress:address});
+ let status=200;
+ for(let i=0;i<30&&status===200;i++) status=(await ticket('198.51.100.7')).status;
+ assert.equal(status,429);
+ assert.equal((await ticket('198.51.100.8')).status,200);
+ const proxied=defineSite({origin,tools:[],trustProxy:true});
+ const viaProxy=address=>proxied.handle(req('tickets',{protocol:TUNNEL_PROTOCOL},{origin,'x-forwarded-for':address+', 10.0.0.1'}));
+ status=200;
+ for(let i=0;i<30&&status===200;i++) status=(await viaProxy('203.0.113.1')).status;
+ assert.equal(status,429);
+ assert.equal((await viaProxy('203.0.113.2')).status,200);
+});
+
+test('CLI init warns when the project is deployed on serverless functions',t=>{
+ const root=fixture(t);mkdirSync(join(root,'src','app'),{recursive:true});
+ writeFileSync(join(root,'package.json'),JSON.stringify({name:'fixture',dependencies:{next:'15.5.27'}}));writeFileSync(join(root,'vercel.json'),'{}');
+ writeFileSync(join(root,'src','app','layout.jsx'),`export default function Layout({children}) {return <html><body>{children}</body></html>}`);
+ const result=spawnSync(process.execPath,[resolve('bin/cli.mjs'),'init','--skip-install','--cwd',root],{encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);assert.match(result.stderr,/Vercel/);assert.match(result.stderr,/serverless/);
 });

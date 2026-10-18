@@ -4,7 +4,7 @@ Un programma desktop autonomo che crea un tunnel tra la LLM eseguita sul tuo com
 
 ## Come funziona
 
-**Per chi naviga:** scarichi Jase Tunnel e lo apri. Mentre navighi, quando una pagina accetta il tunnel ricevi una notifica del sistema: «example.com accetta Jase Tunnel». Scegli «Collega», confermi dominio e modello nel pannello dell’app e gli strumenti IA di quel sito usano la tua LLM. Il collegamento dura al massimo trenta minuti e **Scollega siti** lo interrompe subito.
+**Per chi naviga:** scarichi Jase Tunnel e lo apri (gli eseguibili non sono firmati: il sistema chiede una conferma, vedi [Eseguibili non firmati](#eseguibili-non-firmati)). Mentre navighi, quando una pagina accetta il tunnel ricevi una notifica del sistema: «example.com accetta Jase Tunnel». Scegli «Collega», confermi dominio e modello nel pannello dell’app e gli strumenti IA di quel sito usano la tua LLM. Il collegamento dura al massimo trenta minuti e **Scollega siti** lo interrompe subito.
 
 **Per chi gestisce un servizio:** un comando nella cartella del progetto installa e configura il modulo.
 
@@ -12,7 +12,9 @@ Un programma desktop autonomo che crea un tunnel tra la LLM eseguita sul tuo com
 npx jase-tunnel init
 ```
 
-`init` installa il pacchetto `jase-tunnel`, rileva gli strumenti IA già esportati dal progetto, pubblica il manifest `/.well-known/jase-tunnel.json`, collega il broker al server e aggiunge il pannello alle pagine. Configura da solo Next.js App Router, Express e i server `node:http`. Dettagli in [packages/sdk](packages/sdk/README.md).
+`init` installa il pacchetto `jase-tunnel`, rileva gli strumenti IA già esportati dal progetto (lasciandoli disabilitati finché non li abiliti), pubblica il manifest `/.well-known/jase-tunnel.json`, collega il broker al server e aggiunge il pannello alle pagine. Configura da solo Next.js App Router, Express e i server `node:http`. Dettagli in [packages/sdk](packages/sdk/README.md).
+
+Il modello gira sul computer del visitatore, quindi è il visitatore a decidere quali strumenti chiamare e con quali argomenti: ogni strumento abilitato è, di fatto, un’API pubblica del sito. Il modulo accetta solo strumenti con un controllo `authorize(context, args)` o dichiarati `public`.
 
 L’app non legge le schede del browser e non contiene domini predefiniti: sono le pagine compatibili a contattarla, e ogni accesso alla LLM richiede il consenso nell’app. Protocollo e confini sono descritti in [docs/WEB-STANDARD.md](docs/WEB-STANDARD.md) e [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -38,6 +40,20 @@ Su Windows l’icona compare nell’area di notifica vicino all’orologio; Wind
 Su Linux occorre GTK 3 (pacchetto `libgtk-3-0` o `libgtk-3-0t64` su Ubuntu/Debian); per le notifiche serve `notify-send` (`libnotify-bin`). L’app usa Ayatana AppIndicator, se installato, oppure l’icona GTK tradizionale. Senza un’area di notifica, chiudere la finestra la riduce a icona.
 
 Ollama o LM Studio devono essere installati e attivi: i motori e i pesi non sono inclusi.
+
+## Eseguibili non firmati
+
+**I pacchetti di Jase Tunnel non sono firmati.** Su macOS manca la firma Developer ID con notarizzazione Apple (il bundle ha solo una firma ad hoc); su Windows manca la firma Authenticode. Il sistema operativo non può quindi verificare chi ha prodotto l’eseguibile né che non sia stato modificato dopo la pubblicazione, e lo presenta come software di uno sviluppatore non identificato.
+
+**Aprendo Jase Tunnel accetti questo rischio di sicurezza sul tuo sistema.** L’app resta in esecuzione, ascolta su `127.0.0.1:11439` e usa i modelli locali: installala solo se ti fidi di questo progetto, scaricala solo dalle [release ufficiali](https://github.com/Strnozz/jase-tunnel/releases) e mai da copie ricevute da altri.
+
+Per aprirla la prima volta:
+
+- **macOS:** apri l’app, chiudi l’avviso, poi vai in **Impostazioni di Sistema → Privacy e sicurezza** e scegli **Apri comunque** accanto a Jase Tunnel. Fino a macOS 14 basta anche il clic destro sull’app → **Apri** → **Apri**.
+- **Windows:** nella finestra «Windows ha protetto il PC» di SmartScreen scegli **Ulteriori informazioni** → **Esegui comunque**. Alcuni antivirus possono segnalare o mettere in quarantena l’eseguibile.
+- **Linux:** l’archivio `.tar.gz` non ha firma; estrailo e avvia l’eseguibile.
+
+Prima di aprirla puoi confrontare l’impronta del file con `SHA256SUMS` della stessa release: `shasum -a 256 <file>` su macOS, `sha256sum <file>` su Linux, `Get-FileHash <file>` in PowerShell. Il controllo rileva un download corrotto o sostituito durante il trasferimento, ma non protegge da una release pubblicata da un account compromesso: solo una firma lo farebbe.
 
 ## Sviluppo
 
@@ -74,14 +90,14 @@ npm run build:dev
 npm run build
 ```
 
-Questa versione scrive in `dist/`. `--out <cartella>` permette un percorso differente. Il bundle macOS ha una firma ad hoc; firma Developer ID, notarizzazione Apple e firma Windows non sono configurate.
+Questa versione scrive in `dist/`. `--out <cartella>` permette un percorso differente. Il bundle macOS ha una firma ad hoc; firma Developer ID, notarizzazione Apple e firma Windows non sono configurate (vedi [Eseguibili non firmati](#eseguibili-non-firmati)).
 
 ## Release su GitHub
 
 Gli eseguibili sono pubblicati in [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases); il pannello web dei siti propone il download da qui. Il workflow `release.yml` si attiva sulla pubblicazione di un tag che corrisponde a `VERSION`:
 
-- `v0.3.0`: release stabile per i siti HTTPS pubblici.
-- `dev-v0.3.0-preview1`: prerelease di sviluppo, che accetta anche siti in `localhost`.
+- `v0.3.1`: release stabile per i siti HTTPS pubblici.
+- `dev-v0.3.1-preview1`: prerelease di sviluppo, che accetta anche siti in `localhost`.
 
 Prima verifica il codice sui tre sistemi, poi compila i cinque pacchetti sul runner Mac. Controlla commit, run, canale, inventario e SHA-256 e carica i file in una bozza; solo dopo il caricamento completo rende pubblica la release. Una release già pubblica non viene sovrascritta.
 

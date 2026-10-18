@@ -1,6 +1,6 @@
 {
   "name": "jase-tunnel",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Jase Tunnel: collega i modelli locali agli strumenti IA del sito.",
   "type": "module",

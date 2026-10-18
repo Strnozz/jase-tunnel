@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { defineSite } from '../src/server.mjs';
 let executions=0;
-const site=defineSite({name:'Independent fixture shop',tools:[{name:'opening_hours',description:'Read opening hours',parameters:{type:'object',properties:{day:{type:'string'}},required:['day'],additionalProperties:false},readOnly:true,execute:({day})=>{executions++;return{day,opens:'09:00'};}}]});
+const site=defineSite({name:'Independent fixture shop',tools:[{name:'opening_hours',description:'Read opening hours',parameters:{type:'object',properties:{day:{type:'string'}},required:['day'],additionalProperties:false},readOnly:true,public:true,execute:({day})=>{executions++;return{day,opens:'09:00'};}}]});
 const server=http.createServer(async(req,res)=>{
   if(req.url==='/fixture-state'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({executions}));return;}
   const controller=new AbortController();res.on('close',()=>{if(!res.writableEnded)controller.abort();});
