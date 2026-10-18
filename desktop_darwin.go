@@ -65,7 +65,7 @@ func jaseDesktopAction(action *C.char, enabled C.int) {
 	case "open-jase":
 		go a.openJase()
 	case "revoke-sites":
-		go a.revokeWebLinks()
+		go a.revokeLinks()
 	}
 }
 

@@ -79,7 +79,7 @@ Serve **Jase Tunnel 0.2.0 o successivo**. La release 0.1.0 accetta soltanto Jase
 
 Il collegamento dura al massimo trenta minuti, resta vincolato a quel modello e può essere revocato dal sito o dal pulsante **Scollega siti** nell'app. La revoca nativa interrompe anche le inferenze attive. Il protocollo legacy di Jase resta separato.
 
-In produzione usare HTTPS e, se il reverse proxy cambia l'autorità della Request, configurare `JASE_TUNNEL_ORIGIN=https://il-tuo-dominio`. Per localhost usare la build desktop `--dev`. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439`; il modulo non allenta automaticamente le policy del progetto.
+In produzione usare HTTPS e, se il reverse proxy cambia l'autorità della Request, configurare `JASE_TUNNEL_ORIGIN=https://il-tuo-dominio`. Per localhost usare la build desktop di sviluppo (`npm run build:dev`): una release non accetta origini loopback. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439`; il modulo non allenta automaticamente le policy del progetto.
 
 Il primo adattatore del broker usa memoria del processo: un'istanza Node persistente e affinità delle richieste sono necessarie. Non è un broker distribuito per funzioni serverless o più worker; un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming, MCP remoto e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.
 

@@ -31,8 +31,9 @@ const protocol = "jase-companion-v1"
 var version = "dev"
 
 // Loopback site origins (http://localhost:3000 …) are for development builds only
-// (`npm run companion:build -- --dev` sets this). A release accepts only https://jaseengine.it:
+// (`npm run build:dev` sets this through -ldflags). A release accepts only https://jaseengine.it:
 // otherwise any local web page could pair the app to a server of its own and use the models.
+// No runtime flag can turn a release into a development build.
 var devBuild = "false"
 
 type link struct {
@@ -71,8 +72,10 @@ type application struct {
 	activity activityLog
 	nativeUI bool
 	web      *webManager
-	webRuns  map[string]context.CancelFunc
+	runs     map[string]context.CancelFunc
 	webHTTP  *http.Client
+	// LM Studio instance loaded by Jase for each model name (see studioInstance).
+	studioLoaded map[string]string
 }
 
 func main() {
@@ -83,7 +86,7 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Do not show a browser picker")
 	debug := flag.Bool("debug", false, "Log prompts, model thinking, replies and every call to Jase (local diagnostics)")
 	think := flag.Bool("think", false, "Let models that declare the thinking capability reason before answering")
-	dev := flag.Bool("dev", false, "Also accept http://localhost sites (local development of Jase)")
+	dev := flag.Bool("dev", false, "Development builds only: accepted for compatibility, a release refuses it")
 	site := flag.String("site", "https://jaseengine.it", "Jase site opened by the app")
 	headless := flag.Bool("headless", false, "Run without the desktop interface (explicit terminal diagnostics only)")
 	flag.Parse()
@@ -97,8 +100,14 @@ func main() {
 			return
 		}
 	}
-	if *dev {
-		devBuild = "true"
+	if *dev && devBuild != "true" {
+		message := "Questa versione di Jase Tunnel non accetta --dev. Per i siti in localhost usa una build di sviluppo (npm run build:dev)."
+		if desktopAvailable && !*headless {
+			desktopStartupError(message)
+		} else {
+			log.Print(message)
+		}
+		return
 	}
 	if devBuild == "true" {
 		explicitSite := false
@@ -298,8 +307,9 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	origin := r.Header.Get("Origin")
-	localOrigin := fmt.Sprintf("http://127.0.0.1:%d", a.port)
-	if origin != "" && !allowedOrigin(origin) && origin != localOrigin {
+	// The status page is reachable under both Host names accepted above.
+	localOrigin := origin == fmt.Sprintf("http://127.0.0.1:%d", a.port) || origin == fmt.Sprintf("http://localhost:%d", a.port)
+	if origin != "" && !allowedOrigin(origin) && !localOrigin {
 		fail(w, 403, "Apri questo collegamento dal sito Jase.")
 		return
 	}
@@ -353,7 +363,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Ticket string `json:"ticket"`
 			Origin string `json:"origin"`
 		}
-		if decode(w, r, &input, 4096) != nil || len(input.Ticket) != 64 || input.Origin != origin || !allowedOrigin(input.Origin) || origin == localOrigin {
+		if decode(w, r, &input, 4096) != nil || len(input.Ticket) != 64 || input.Origin != origin || !allowedOrigin(input.Origin) || localOrigin {
 			fail(w, 400, "Collegamento non valido.")
 			return
 		}
@@ -375,7 +385,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		if len(a.settings.Links) >= 20 {
 			a.mu.Unlock()
-			fail(w, 409, "Troppi browser collegati. Scollega un browser dalle impostazioni.")
+			fail(w, 409, "Troppi browser collegati. Usa «Scollega siti» nel pannello di Jase Tunnel, poi riprova.")
 			return
 		}
 		a.settings.Links = append(a.settings.Links, connection)

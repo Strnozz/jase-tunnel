@@ -49,7 +49,7 @@ Il workflow include anche una prova del pannello GTK in una sessione Linux virtu
 Su macOS servono anche gli Xcode Command Line Tools per l’interfaccia AppKit. Per avviare una prova isolata con un sito Jase già aperto in locale:
 
 ```sh
-go run . --foreground --dev --site http://localhost:3000 --port 11440 --state-dir .deploy-check/state
+go run -ldflags "-X main.devBuild=true" . --foreground --site http://localhost:3000 --port 11440 --state-dir .deploy-check/state
 ```
 
 La porta alternativa evita di interferire con un’app già avviata; per il collegamento dal sito si usa normalmente la porta `11439`, chiudendo prima l’altra istanza. La cartella di stato contiene credenziali private ed è esclusa da Git. I test automatici usano fixture e server temporanei, senza accedere al database del sito.
@@ -93,7 +93,7 @@ Il sito Jase conserva il modulo web per riconoscere il sistema, proporre il puls
 
 Il sito deve implementare il protocollo `jase-companion-v1`, incluso il broker sul server. Quel componente appartiene al sito Jase e non è incluso in questa app. I dettagli e i confini attuali sono in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-Il percorso legacy accetta `https://jaseengine.it`; i nuovi siti HTTPS pubblici usano esclusivamente le API `/tunnel/v1/`, il manifest e il consenso nativo. Non accedono a inventario, file, importazione o registro del percorso legacy. Le destinazioni remote sono controllate a ogni connessione, senza proxy o redirect, e la connessione viene vincolata agli IP pubblici verificati. `--dev` abilita origini HTTP su loopback. I collegamenti web scadono dopo trenta minuti e restano vincolati al modello scelto; **Scollega siti** li revoca e annulla le inferenze attive.
+Il percorso legacy accetta `https://jaseengine.it`; i nuovi siti HTTPS pubblici usano esclusivamente le API `/tunnel/v1/`, il manifest e il consenso nativo. Non accedono a inventario, file, importazione o registro del percorso legacy. Le destinazioni remote sono controllate a ogni connessione, senza proxy o redirect, e la connessione viene vincolata agli IP pubblici verificati. Solo le build di sviluppo (`npm run build:dev`, che imposta `main.devBuild`) accettano origini HTTP su loopback; una release rifiuta l’opzione `--dev`. I collegamenti web scadono dopo trenta minuti e restano vincolati al modello scelto; **Scollega siti** revoca tutti i collegamenti, compreso quello con `https://jaseengine.it`, e annulla le inferenze attive.
 
 ## Struttura
 

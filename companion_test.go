@@ -78,6 +78,23 @@ func TestLoopbackOriginAndRebindingProtection(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "https://jaseengine.it" {
 		t.Fatal("Jase cannot detect local helper")
 	}
+	// The status page works under both loopback names, but never pairs.
+	for _, local := range []string{"http://127.0.0.1:11439", "http://localhost:11439"} {
+		w = httptest.NewRecorder()
+		r := localRequest("POST", "/v1/show-window", "{}", local)
+		r.Host = strings.TrimPrefix(local, "http://")
+		a.ServeHTTP(w, r)
+		if w.Code != 404 {
+			t.Fatalf("status page at %s rejected: HTTP %d", local, w.Code)
+		}
+		w = httptest.NewRecorder()
+		r = localRequest("POST", "/v1/pair", `{"origin":"`+local+`","ticket":"`+strings.Repeat("a", 64)+`"}`, local)
+		r.Host = strings.TrimPrefix(local, "http://")
+		a.ServeHTTP(w, r)
+		if w.Code != 400 {
+			t.Fatalf("status page at %s paired", local)
+		}
+	}
 	w = httptest.NewRecorder()
 	a.ServeHTTP(w, localRequest("POST", "/v1/quit", "{}", ""))
 	if w.Code != 403 {
@@ -186,7 +203,7 @@ func TestOllamaDiscoveryExcludesCloudAndEmbeddingOnlyModels(t *testing.T) {
 }
 func TestOllamaToolCallAndStructuredOutput(t *testing.T) {
 	a := newTestApp(t)
-	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", Tools: true}
+	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true}
 	a.models = []model{m}
 	previous := engineTransport
 	t.Cleanup(func() { engineTransport = previous })
@@ -208,7 +225,7 @@ func TestOllamaToolCallAndStructuredOutput(t *testing.T) {
 }
 func TestLMStudioKeepsDistinctToolCallIdentifiers(t *testing.T) {
 	a := newTestApp(t)
-	m := model{Key: "lmstudio:qwen", Name: "qwen", Engine: "lmstudio", Tools: true}
+	m := model{Key: "lmstudio:qwen", Name: "qwen", Engine: "lmstudio", ContextTokens: 16384, Tools: true}
 	a.models = []model{m}
 	previous := engineTransport
 	t.Cleanup(func() { engineTransport = previous })
@@ -260,12 +277,59 @@ func TestLMStudioLoadsInstalledModelWithEnoughContext(t *testing.T) {
 		loads++
 		return response(`{"status":"loaded","instance_id":"qwen-ready","load_config":{"context_length":32768}}`), nil
 	})
-	id, err := studioInstance(context.Background(), "qwen", 32768)
-	if err != nil || id != "qwen-ready" || loads != 1 {
+	id, loaded, err := studioInstance(context.Background(), "qwen", 32768, "")
+	if err != nil || id != "qwen-ready" || !loaded || loads != 1 {
 		t.Fatalf("model preparation failed: %s %v", id, err)
 	}
-	if _, err := studioInstance(context.Background(), "uninstalled", 32768); err == nil || loads != 1 {
+	if _, _, err := studioInstance(context.Background(), "uninstalled", 32768, ""); err == nil || loads != 1 {
 		t.Fatal("attempted to load an uninstalled model")
+	}
+}
+
+// A larger context replaces the instance Jase loaded before, never one the person
+// loaded in LM Studio, and a request cannot exceed the published context budget.
+func TestLMStudioReplacesOnlyItsOwnSmallerInstance(t *testing.T) {
+	previous := engineTransport
+	t.Cleanup(func() { engineTransport = previous })
+	var calls []string
+	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		switch r.URL.Path {
+		case "/api/v1/models":
+			return response(`{"models":[{"key":"qwen","loaded_instances":[{"id":"person","config":{"context_length":4096}},{"id":"jase-small","config":{"context_length":8192}}]}]}`), nil
+		case "/api/v1/models/unload":
+			calls = append(calls, "unload "+body["instance_id"].(string))
+			return response(`{"instance_id":"jase-small"}`), nil
+		case "/api/v1/models/load":
+			calls = append(calls, "load")
+			return response(`{"status":"loaded","instance_id":"jase-large","load_config":{"context_length":16384}}`), nil
+		case "/v1/chat/completions":
+			return response(`{"choices":[{"message":{"content":"done"}}]}`), nil
+		}
+		t.Fatalf("unexpected model endpoint %s", r.URL.Path)
+		return nil, nil
+	})
+	a := newTestApp(t)
+	m := model{Key: "lmstudio:qwen", Name: "qwen", Engine: "lmstudio", ContextTokens: 16384, Tools: true}
+	a.models = []model{m}
+	a.studioLoaded = map[string]string{"qwen": "jase-small"}
+	if _, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 16384}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(calls, ",") != "unload jase-small,load" || a.studioLoaded["qwen"] != "jase-large" {
+		t.Fatalf("instances not replaced: %v %v", calls, a.studioLoaded)
+	}
+	calls = nil
+	a.studioLoaded = map[string]string{}
+	if _, _, err := studioInstance(context.Background(), "qwen", 16384, ""); err != nil || strings.Join(calls, ",") != "load" {
+		t.Fatalf("unloaded an instance Jase did not load: %v %v", calls, err)
+	}
+	calls = nil
+	if _, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 32768}); err == nil || len(calls) != 0 {
+		t.Fatal("context above the published budget reached the engine")
 	}
 }
 func TestLocalModelRequestsNeverFollowRedirects(t *testing.T) {
@@ -351,7 +415,7 @@ func TestContextFollowsMemoryAndThinkingIsOffOnlyWhereDeclared(t *testing.T) {
 
 func TestOneFailedStatusCheckDoesNotCancelInference(t *testing.T) {
 	a := newTestApp(t)
-	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", Tools: true}
+	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true}
 	a.models = []model{m}
 	every := statusEvery
 	t.Cleanup(func() { statusEvery = every })
@@ -403,7 +467,7 @@ func TestLogMarksEachQueryAndShowsThinkingOnlyInDebug(t *testing.T) {
 		a := newTestApp(t)
 		a.debug.Store(debug)
 		a.think.Store(true)
-		m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", Tools: true, Thinking: true}
+		m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true, Thinking: true}
 		a.models = []model{m}
 		a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) { return response(`{"ok":true,"active":true}`), nil })
 		a.handleTask(link{Origin: "https://jaseengine.it", Token: strings.Repeat("b", 64)}, task{ID: strings.Repeat("9", 64), Trace: &trace{Kind: "goal", Ref: "1a2b3c4d", Turn: 3},
