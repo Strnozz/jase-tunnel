@@ -1,7 +1,10 @@
 import Ajv from 'ajv';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { toJSONSchema } from 'zod';
 
-const ajv = new Ajv({ strict: false, allErrors: false, coerceTypes: false, removeAdditional: false, useDefaults: false });
+const validationOptions = { strict: false, allErrors: false, coerceTypes: false, removeAdditional: false, useDefaults: false, addUsedSchema: false };
+const ajv = new Ajv(validationOptions);
+const ajv2020 = new Ajv2020(validationOptions);
 const namePattern = /^[a-z][a-z0-9_]{1,40}$/;
 export function defineTool(tool) { return tool; }
 
@@ -17,7 +20,7 @@ export function adaptTool(value, options = {}) {
   if (!parameters || typeof parameters !== 'object' || parameters.type !== 'object') throw new Error(`${name}: serve uno schema JSON oggetto o Zod 4.`);
   if (JSON.stringify(parameters).length > 32_000) throw new Error(`${name}: schema troppo grande.`);
   // Remote references are never fetched; Ajv refuses unresolved references.
-  const validate = ajv.compile(parameters);
+  const validate = (parameters.$schema === 'https://json-schema.org/draft/2020-12/schema' ? ajv2020 : ajv).compile(parameters);
   const description = options.description ?? value.description;
   if (typeof description !== 'string' || !description.trim() || description.length > 4000) throw new Error(`${name}: descrizione mancante o troppo lunga.`);
   const execute = typeof value === 'function' ? value : value.execute ?? value.invoke;

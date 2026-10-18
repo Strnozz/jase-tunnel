@@ -30,6 +30,7 @@ Chrome ed Edge chiedono al visitatore il permesso prima che una pagina contatti 
 - Rilevamento di Ollama, LM Studio e dei file nei percorsi predefiniti dei modelli; selezione manuale di altri pesi.
 - Stato dei collegamenti e registro locale di invii, ricezioni e inferenze, con filtri e dettagli selezionabili.
 - Il modulo per i siti (`packages/sdk`, pacchetto npm `jase-tunnel`): installatore, broker, pannello web e adattatori per Next.js, Express e `node:http`.
+- Adattatore MCP facoltativo (`jase-tunnel/mcp`, SDK 0.5): il sito seleziona gli strumenti di un server MCP, conserva autorizzazioni e credenziali sul proprio server e li mette a disposizione del modello locale del visitatore. [Configurazione](packages/sdk/README.md#strumenti-da-un-server-mcp-sdk-05).
 
 Su tutti e tre i sistemi l’app apre il pannello e rimane riconoscibile mentre lavora in background. **Chiudi Jase Tunnel** termina anche il servizio e le inferenze del tunnel, lasciando aperti Ollama e LM Studio. Riaprire l’eseguibile porta in primo piano l’istanza già avviata.
 

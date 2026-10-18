@@ -12,6 +12,12 @@ Jase Tunnel è un programma autonomo: collega la LLM eseguita sul computer della
 
 Il protocollo è `jase-tunnel-v1`, descritto in [WEB-STANDARD.md](WEB-STANDARD.md). Non serve un relay di terzi e il router non deve esporre porte in ingresso.
 
+## Integrazione MCP facoltativa
+
+L’SDK 0.5 espone `mcpTools` da `jase-tunnel/mcp`. Il server del sito interroga un endpoint MCP configurato dal proprietario con il client ufficiale opzionale, seleziona gli strumenti abilitati e inoltra le chiamate autorizzate. L’app desktop e il browser non ricevono le credenziali MCP e non cambiano protocollo. Il server MCP resta responsabile dei propri dati e permessi.
+
+Le politiche `authorize`/`public` e `readOnly` sono dichiarazioni del proprietario: non vengono ricavate automaticamente dalle annotazioni del server remoto. Cataloghi e risultati sono limitati, le operazioni scadono e rispettano la cancellazione, i redirect sono rifiutati e i client vengono chiusi dopo ciascuna operazione per evitare sessioni condivise fra visitatori. Sono supportati strumenti Streamable HTTP con risultati testuali e JSON strutturati; stato implicito tra connessioni e funzionalità MCP ulteriori richiedono un’integrazione distinta. [Configurazione ed esempio](../packages/sdk/README.md#strumenti-da-un-server-mcp-sdk-05).
+
 ## Interfacce desktop
 
 macOS usa AppKit, Windows le API Win32 e Linux GTK 3, caricata da `purego`. Il motore e il pannello restano nello stesso processo. Tutti i pannelli leggono copie dello stato prive di token o percorsi dei pesi; il registro non ha API HTTP.

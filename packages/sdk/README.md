@@ -63,7 +63,7 @@ npx jase-tunnel tools enable opening_hours --public    # sicuro per chiunque
 
 La scansione analizza i sorgenti JavaScript/TypeScript come sintassi; **non importa o esegue il progetto** e non legge variabili d'ambiente, credenziali, database, cartelle dati, dipendenze, test o percorsi simbolici. Non usa una LLM per interpretare i sorgenti e non invia codice a un servizio.
 
-Riconosce dichiarazioni esportate `tool(...)` di AI SDK, `tool(fn, config)` di LangChain e `defineTool(...)` del modulo; inoltre oggetti o raccolte esportate con descrizione, schema e `execute`/`invoke`. I tool locali non esportati, i factory che richiedono contesto e i registri MCP costruiti dinamicamente richiedono un adattatore. Non trasforma funzioni ordinarie o route HTTP arbitrarie in strumenti IA.
+Riconosce dichiarazioni esportate `tool(...)` di AI SDK, `tool(fn, config)` di LangChain e `defineTool(...)` del modulo; inoltre oggetti o raccolte esportate con descrizione, schema e `execute`/`invoke`. I tool locali non esportati e i factory che richiedono contesto richiedono un adattatore. Per un server MCP usa l’integrazione facoltativa descritta sotto: la scansione non si collega automaticamente ai server. Non trasforma funzioni ordinarie o route HTTP arbitrarie in strumenti IA.
 
 Gli schemi supportati sono JSON Schema oggetto e Zod 4 convertibile in JSON Schema. Nomi duplicati e schemi incompleti producono un errore esplicito. Le dichiarazioni restano in `jase-tunnel.tools.json`; gli import del server sono in `.jase-tunnel/tools.ts` (o `.js`).
 
@@ -105,6 +105,50 @@ Lo schema viene validato prima di `authorize` e dell'esecutore. `request` contie
 
 Uno strumento è eseguito senza conferma soltanto se dichiara `readOnly: true`, `riskLevel: 'read'` o `annotations.readOnlyHint: true` (oppure con `--read-only`). Gli altri richiedono una conferma nel pannello, vincolata a browser, chiamate e scadenza. L'inventario rilevato non comporta l'esecuzione di alcun tool. `readOnly` non sostituisce l'autorizzazione dei dati privati.
 
+## Strumenti da un server MCP (SDK 0.5)
+
+Il sito può usare strumenti MCP esistenti senza riscriverne gli esecutori. L’adattatore gira sul server del sito; il desktop continua a parlare `jase-tunnel-v1` e richiede lo stesso consenso.
+
+MCP è facoltativo: installa il client ufficiale solo nei progetti che lo usano.
+
+```sh
+npm install @modelcontextprotocol/client@^2.3.1
+```
+
+Nella configurazione generata da `init`, aggiungi il provider remoto agli strumenti locali:
+
+```ts
+import { defineSite } from 'jase-tunnel/server';
+import { mcpTools } from 'jase-tunnel/mcp';
+import { tools } from './.jase-tunnel/tools';
+
+const catalog = mcpTools({
+  url: process.env.CATALOG_MCP_URL!, // endpoint HTTPS configurato dal proprietario
+  tools: {
+    search_products: {
+      name: 'catalog.search', // nome remoto; la chiave è il nome visto dal modello
+      public: true,          // solo se il catalogo è accessibile a chiunque
+      readOnly: true         // dichiarazione esplicita del proprietario
+    }
+  }
+});
+
+export default defineSite({
+  name: 'Il mio negozio', origin: process.env.JASE_TUNNEL_ORIGIN,
+  tools: async context => [...tools, ...await catalog(context)]
+});
+```
+
+Solo gli strumenti elencati vengono esposti. Ogni regola richiede `authorize(context, args)` oppure `public: true`; le annotazioni `readOnlyHint` del server remoto non abilitano né autorizzano nulla. Senza `readOnly: true`, la chiamata richiede conferma nel pannello.
+
+Per dati privati, `headers: async ({ request, signal }) => ...` deve ottenere le credenziali MCP dalla sessione **verificata** del visitatore; `authorize` controlla anche gli argomenti. Il modulo non inoltra automaticamente cookie o header del browser e non condivide client o sessioni MCP tra visitatori. Non usare un token amministratore con strumenti pubblici che accedono a dati riservati. Il consenso al modello locale non assegna permessi sul servizio.
+
+Supporta **Streamable HTTP**, negoziando MCP `2026-07-28` e il fallback ai server `2025` compatibili, e risultati testuali/JSON strutturati. HTTPS è richiesto salvo HTTP su loopback per servizi locali; URL e selezione degli strumenti appartengono alla configurazione del sito, mai ai parametri del visitatore. Redirect rifiutati, scadenza per operazione di 15 secondi (`timeoutMs`, massimo 30), risposte complessive limitate a 1 MiB e risultati al modello limitati a 30.000 caratteri.
+
+Una connessione MCP nuova viene chiusa dopo ciascuna operazione: i server che dipendono dallo stato implicito di una connessione tra chiamate non sono supportati. Stato applicativo e riferimenti devono passare negli argomenti, sotto il controllo del server MCP. Non sono inclusi stdio, il vecchio trasporto HTTP+SSE, sampling, elicitation, Tasks, risorse, prompt o risultati multimodali. Le conversazioni e i limiti di hosting di Jase Tunnel restano quelli descritti sotto.
+
+Nel repository, `node packages/sdk/examples/mcp-shop.mjs` (dopo `npm ci --prefix packages/sdk`) avvia un negozio dimostrativo su `http://127.0.0.1:3322` con un vero server MCP locale e il pannello Tunnel. Per collegarlo da localhost serve la build di sviluppo dell’app. Non scrive dati persistenti e termina entrambi i server con Ctrl-C.
+
 ## App desktop e collegamento
 
 Serve **Jase Tunnel 0.3.0 o successivo** sul computer del visitatore; il pannello propone il download dalle release di GitHub. Il visitatore non deve fare altro: quando il browser lo consente senza mostrare richieste di permesso, la pagina si annuncia all’app, che verifica dominio e manifest e mostra una notifica. «Collega» nella notifica fa proseguire la pagina fino al consenso nell’app, dove il visitatore sceglie il modello. Prima del consenso il sito non riceve l’inventario dei modelli.
@@ -117,7 +161,7 @@ In produzione usare HTTPS e, se il reverse proxy cambia l’autorità della Requ
 
 Le richieste senza il cookie del modulo (primo collegamento, associazione dell’app) sono limitate per indirizzo del client e, con un margine più ampio, tutte insieme. L’adattatore Node usa l’indirizzo del socket. Dietro un reverse proxy che imposta `X-Forwarded-For` (nginx, un load balancer, Next.js in produzione) imposta `JASE_TUNNEL_TRUST_PROXY=true` o `trustProxy: true` nella configurazione: altrimenti tutti i client condividono lo stesso limite. Non attivarlo senza un proxy che sovrascrive l’header, perché il client potrebbe sceglierlo da sé. Per un servizio in `localhost` serve una build di sviluppo dell’app (`npm run build:dev` nel repository): una release accetta solo siti HTTPS pubblici. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439` e lo script del pannello dal proprio dominio; il modulo non allenta automaticamente le policy del progetto.
 
-Il broker usa la memoria del processo: servono un’istanza Node persistente e affinità delle richieste. **Non funziona su Vercel, Netlify, Cloudflare Workers o altre funzioni serverless**, né con più worker senza affinità: le richieste in attesa vivono in un solo processo. Un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming, MCP remoto e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.
+Il broker usa la memoria del processo: servono un’istanza Node persistente e affinità delle richieste. **Non funziona su Vercel, Netlify, Cloudflare Workers o altre funzioni serverless**, né con più worker senza affinità: le richieste in attesa vivono in un solo processo. Un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming delle risposte del modello e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.
 
 ## Licenza
 
