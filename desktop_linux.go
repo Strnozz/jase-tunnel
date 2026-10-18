@@ -133,19 +133,19 @@ func prepareDesktopUI() (err error) {
 	}
 	defer func() {
 		if failure := recover(); failure != nil {
-			err = fmt.Errorf("Interfaccia GTK 3 non disponibile: %v", failure)
+			err = fmt.Errorf("GTK 3 interface unavailable: %v", failure)
 		}
 	}()
 	lib, err := purego.Dlopen("libgtk-3.so.0", purego.RTLD_NOW|purego.RTLD_GLOBAL)
 	if err != nil {
-		return errors.New("Per aprire Jase Tunnel serve GTK 3 (su Ubuntu/Debian: libgtk-3-0 o libgtk-3-0t64). Il tunnel non è stato avviato in background.")
+		return errors.New("Jase Tunnel requires GTK 3 (on Ubuntu/Debian: libgtk-3-0 or libgtk-3-0t64). The tunnel was not started in the background.")
 	}
 	fields := reflect.ValueOf(&gtk).Elem()
 	for i := 0; i < fields.NumField(); i++ {
 		purego.RegisterLibFunc(fields.Field(i).Addr().Interface(), lib, nativeSymbol(fields.Type().Field(i).Name))
 	}
 	if gtk.GtkInitCheck(0, 0) == 0 {
-		return errors.New("Non è disponibile una sessione grafica. Avvia Jase Tunnel dal desktop oppure usa --headless --foreground per la diagnostica.")
+		return errors.New("No graphical session is available. Start Jase Tunnel from the desktop or use --headless --foreground for diagnostics.")
 	}
 	gtkLoaded = true
 	return nil
@@ -155,7 +155,7 @@ func showDesktopUI() { linuxShow.Store(true) }
 var linuxApplication atomic.Pointer[application]
 
 // notify-send reaches the desktop's freedesktop notification service. Where it supports
-// actions, «Collega» (or a click on the notification) lets the waiting page continue;
+// actions, «Connect» (or a click on the notification) lets the waiting page continue;
 // elsewhere the notification only informs. The panel's journal keeps every event.
 var linuxNotificationActions = sync.OnceValue(func() bool {
 	path, err := exec.LookPath("notify-send")
@@ -174,7 +174,7 @@ func notifyDesktop(id, title, body string) {
 	go func() {
 		args := []string{"--app-name=Jase Tunnel", "--expire-time=20000"}
 		if linuxNotificationActions() {
-			args = append(args, "--action=default=Collega", "--action=connect=Collega", "--wait")
+			args = append(args, "--action=default=Connect", "--action=connect=Connect", "--wait")
 		}
 		output, err := exec.Command(path, append(args, "--", title, body)...).Output()
 		answer := strings.TrimSpace(string(output))
@@ -199,10 +199,10 @@ func gtkDialog(parent uintptr, message string, confirm bool) bool {
 	gtk.GtkContainerSetBorderWidth(area, 20)
 	gtk.GtkContainerAdd(area, label)
 	if confirm {
-		gtk.GtkDialogAddButton(d, "Annulla", -6)
-		gtk.GtkDialogAddButton(d, "Riavvia Jase Tunnel", -3)
+		gtk.GtkDialogAddButton(d, "Cancel", -6)
+		gtk.GtkDialogAddButton(d, "Restart Jase Tunnel", -3)
 	} else {
-		gtk.GtkDialogAddButton(d, "Chiudi", -7)
+		gtk.GtkDialogAddButton(d, "Close", -7)
 	}
 	gtk.GtkWidgetShowAll(d)
 	response := gtk.GtkDialogRun(d)
@@ -210,7 +210,7 @@ func gtkDialog(parent uintptr, message string, confirm bool) bool {
 	return response == -3
 }
 func confirmDesktopReplacement() bool {
-	return gtkDialog(0, "Una versione precedente di Jase Tunnel è già aperta. Riavviala per usare il nuovo pannello. Le richieste in corso verranno interrotte.", true)
+	return gtkDialog(0, "An earlier version of Jase Tunnel is already running. Restart it to use the new panel. Current requests will be interrupted.", true)
 }
 func desktopStartupError(message string) {
 	if gtkLoaded {
@@ -329,7 +329,7 @@ func (p *linuxPanel) selectWeights(folder bool) {
 		return
 	}
 	if !p.a.importMu.TryLock() {
-		gtk.GtkLabelSetText(p.notice, "Un’importazione è già in corso. Attendi che termini.")
+		gtk.GtkLabelSetText(p.notice, "An import is already in progress. Wait for it to finish.")
 		return
 	}
 	locked := true
@@ -344,10 +344,10 @@ func (p *linuxPanel) selectWeights(folder bool) {
 	if folder {
 		action = 2
 	}
-	d := gtk.GtkFileChooserDialogNew("Aggiungi pesi a Jase Tunnel", p.window, action, 0)
+	d := gtk.GtkFileChooserDialogNew("Add weights to Jase Tunnel", p.window, action, 0)
 	p.dialog = d
-	gtk.GtkDialogAddButton(d, "Annulla", -6)
-	gtk.GtkDialogAddButton(d, "Aggiungi", -3)
+	gtk.GtkDialogAddButton(d, "Cancel", -6)
+	gtk.GtkDialogAddButton(d, "Add", -3)
 	if !folder {
 		filter := gtk.GtkFileFilterNew()
 		gtk.GtkFileFilterSetName(filter, "File GGUF")
@@ -377,7 +377,7 @@ func (p *linuxPanel) selectWeights(folder bool) {
 	p.a.importMu.Unlock()
 	locked = false
 	p.imports = p.a.importFromDesktop(func(context.Context) (string, bool, error) { return path, folder, nil })
-	gtk.GtkLabelSetText(p.notice, "Aggiungo i pesi al motore locale…")
+	gtk.GtkLabelSetText(p.notice, "Adding weights to the local engine…")
 	p.refresh()
 }
 func (p *linuxPanel) importSelected() {
@@ -388,7 +388,7 @@ func (p *linuxPanel) importSelected() {
 	index := int(gtk.GtkListBoxRowGetIndex(row))
 	if index >= 0 && index < len(p.modelRows) && p.modelRows[index].ID != "" {
 		p.imports = p.a.importDetectedFromDesktop(p.modelRows[index].ID)
-		gtk.GtkLabelSetText(p.notice, "Aggiungo i pesi al motore locale…")
+		gtk.GtkLabelSetText(p.notice, "Adding weights to the local engine…")
 		p.refresh()
 	}
 }
@@ -435,7 +435,7 @@ func (p *linuxPanel) refresh() {
 		p.site, p.siteRows = approval.Origin, nil
 		gtk.GtkNotebookSetCurrentPage(p.tabs, 1)
 		d := gtk.GtkDialogNew()
-		gtk.GtkWindowSetTitle(d, "Collegare "+approval.Site+" a Jase Tunnel?")
+		gtk.GtkWindowSetTitle(d, "Connect "+approval.Site+" to Jase Tunnel?")
 		gtk.GtkWindowSetModal(d, 1)
 		gtk.GtkWindowSetTransientFor(d, p.window)
 		area := gtk.GtkDialogGetContentArea(d)
@@ -449,11 +449,11 @@ func (p *linuxPanel) refresh() {
 		}
 		gtk.GtkComboBoxSetActive(models, 0)
 		gtkPack(box, models, false)
-		gtk.GtkDialogAddButton(d, "Rifiuta", -6)
-		allow := gtk.GtkDialogAddButton(d, "Consenti con questo modello", -3)
+		gtk.GtkDialogAddButton(d, "Decline", -6)
+		allow := gtk.GtkDialogAddButton(d, "Allow this model", -3)
 		if len(approval.Models) == 0 {
 			gtk.GtkWidgetSetSensitive(allow, 0)
-			gtkPack(box, gtkLabel("Avvia un modello compatibile in Ollama o LM Studio, poi riprova."), false)
+			gtkPack(box, gtkLabel("Start a compatible model in Ollama or LM Studio, then try again."), false)
 		}
 		gtk.GtkWidgetShowAll(d)
 		answer := gtk.GtkDialogRun(d)
@@ -546,35 +546,35 @@ func (a *application) runDesktopUI() {
 	defer gtk.GtkWidgetDestroy(p.window)
 	icon := filepath.Join(a.stateDir, "desktop-icon.png")
 	if err := os.WriteFile(icon, linuxIconPNG, 0600); err != nil {
-		desktopStartupError("Impossibile preparare l’icona nella cartella privata di Jase Tunnel.")
+		desktopStartupError("Could not prepare the icon in the private Jase Tunnel directory.")
 		return
 	}
 	gtk.GtkWindowSetIconFromFile(p.window, icon, 0)
 	root := gtk.GtkBoxNew(1, 12)
 	gtk.GtkContainerSetBorderWidth(root, 20)
 	gtk.GtkContainerAdd(p.window, root)
-	p.status = gtkLabel("Jase Tunnel è in esecuzione")
+	p.status = gtkLabel("Jase Tunnel is running")
 	p.connection = gtkLabel("")
 	gtkPack(root, p.status, false)
 	gtkPack(root, p.connection, false)
 	buttons := gtk.GtkBoxNew(0, 10)
 	gtkPack(root, buttons, false)
-	gtkButton(buttons, "Scollega siti", func() { go a.revokeLinks() })
-	p.add = gtkButton(buttons, "Aggiungi pesi…", p.chooseWeights)
+	gtkButton(buttons, "Disconnect websites", func() { go a.revokeLinks() })
+	p.add = gtkButton(buttons, "Add weights…", p.chooseWeights)
 	gtkButton(buttons, trayLabels[2], a.cancel)
 	tabs := gtk.GtkNotebookNew()
 	gtkPack(root, tabs, true)
 	models := gtk.GtkBoxNew(1, 10)
 	gtk.GtkContainerSetBorderWidth(models, 14)
 	p.models = gtk.GtkListBoxNew()
-	gtkPack(models, gtkLabel("Modelli e pesi trovati sul computer"), false)
+	gtkPack(models, gtkLabel("Models and weights found on this computer"), false)
 	gtkPack(models, gtkScroll(p.models, 180), true)
 	modelButtons := gtk.GtkBoxNew(0, 10)
 	gtkPack(models, modelButtons, false)
-	p.importButton = gtkButton(modelButtons, "Aggiungi selezionati", p.importSelected)
-	p.notice = gtkLabel("Apri Ollama o il server locale di LM Studio. Puoi aggiungere file GGUF o cartelle di pesi compatibili.")
+	p.importButton = gtkButton(modelButtons, "Add selected", p.importSelected)
+	p.notice = gtkLabel("Open Ollama or the LM Studio local server. You can add GGUF files or compatible weights directories.")
 	gtkPack(models, p.notice, false)
-	gtk.GtkNotebookAppendPage(tabs, models, gtk.GtkLabelNew("Modelli"))
+	gtk.GtkNotebookAppendPage(tabs, models, gtk.GtkLabelNew("Models"))
 	page := gtk.GtkBoxNew(1, 10)
 	gtk.GtkContainerSetBorderWidth(page, 14)
 	p.statistics = gtkLabel("")
@@ -595,12 +595,12 @@ func (a *application) runDesktopUI() {
 	}
 	gtk.GtkComboBoxSetActive(p.filter, 0)
 	gtkPack(tools, p.filter, false)
-	p.revokeOne = gtkButton(tools, "Scollega sito", func() {
+	p.revokeOne = gtkButton(tools, "Disconnect website", func() {
 		if p.site != allSites && p.site != "" {
 			go a.revokeSite(p.site)
 		}
 	})
-	gtkButton(tools, "Svuota registro", func() { a.clearActivity(); p.refresh() })
+	gtkButton(tools, "Clear log", func() { a.clearActivity(); p.refresh() })
 	p.events = gtk.GtkListBoxNew()
 	gtkPack(activity, gtkScroll(p.events, 160), true)
 	p.detail = gtk.GtkTextViewNew()
@@ -608,10 +608,10 @@ func (a *application) runDesktopUI() {
 	gtk.GtkTextViewSetWrapMode(p.detail, 2)
 	gtkPack(activity, gtkScroll(p.detail, 110), false)
 	p.detailText(-1)
-	gtk.GtkNotebookAppendPage(tabs, page, gtk.GtkLabelNew("Attività"))
+	gtk.GtkNotebookAppendPage(tabs, page, gtk.GtkLabelNew("Activity"))
 	p.tabs = tabs
-	p.debug = gtk.GtkCheckButtonNewWithLabel("Log dettagliato, inclusi i testi")
-	p.thinking = gtk.GtkCheckButtonNewWithLabel("Ragionamento del modello, se supportato")
+	p.debug = gtk.GtkCheckButtonNewWithLabel("Detailed log, including text")
+	p.thinking = gtk.GtkCheckButtonNewWithLabel("Model reasoning, if supported")
 	gtkPack(root, p.debug, false)
 	gtkPack(root, p.thinking, false)
 	p.privacy = gtkLabel("")
@@ -682,7 +682,7 @@ func (a *application) runDesktopUI() {
 		}
 	}()
 	p.weightsMenu = gtk.GtkMenuNew()
-	for i, label := range []string{"File GGUF…", "Cartella modello…"} {
+	for i, label := range []string{"GGUF file…", "Model directory…"} {
 		item := gtk.GtkMenuItemNewWithLabel(label)
 		gtk.GtkMenuShellAppend(p.weightsMenu, item)
 		folder := i == 1

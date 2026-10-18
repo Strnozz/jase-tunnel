@@ -16,9 +16,9 @@ func (a *application) debugf(format string, args ...any) { a.debugFor("", format
 func (a *application) debugFor(site, format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
 	category, level := "model", "info"
-	if strings.HasPrefix(text, "→ sito") {
+	if strings.HasPrefix(text, "→ website") {
 		category = "server"
-	} else if strings.HasPrefix(text, "← sito") {
+	} else if strings.HasPrefix(text, "← website") {
 		category = "receive"
 	}
 	if strings.Contains(text, "✗") || strings.Contains(text, "HTTP 4") || strings.Contains(text, "HTTP 5") {
@@ -30,13 +30,13 @@ func (a *application) debugFor(site, format string, args ...any) {
 	}
 }
 
-// "richiesta 9f8e7d6c": the first characters of the turn's identifier, never its text.
+// "request 9f8e7d6c": the first characters of the turn's identifier, never its text.
 func queryLabel(t task) string {
 	id := t.ID
 	if len(id) > 8 {
 		id = id[:8]
 	}
-	return "richiesta " + id
+	return "request " + id
 }
 
 func clip(value string, limit int) string {
@@ -44,7 +44,7 @@ func clip(value string, limit int) string {
 	if len(runes) <= limit {
 		return value
 	}
-	return string(runes[:limit]) + fmt.Sprintf(" … [+%d caratteri]", len(runes)-limit)
+	return string(runes[:limit]) + fmt.Sprintf(" … [+%d characters]", len(runes)-limit)
 }
 
 func sizeOf(input any) string {
@@ -61,16 +61,16 @@ func sizeOf(input any) string {
 func onOff(on, available bool) string {
 	switch {
 	case !available:
-		return "non previsto dal modello"
+		return "not supported by the model"
 	case on:
-		return "attivo"
+		return "active"
 	default:
-		return "spento (--think per attivarlo)"
+		return "off (use --think to enable)"
 	}
 }
 
 func (a *application) logTask(site string, t task) {
-	a.recordFor(site, "model", "info", "Richiesta ricevuta", fmt.Sprintf("%s · %s · %d messaggi · %d strumenti", queryLabel(t), t.Model.Name, len(t.Messages), len(t.Tools)))
+	a.recordFor(site, "model", "info", "Request received", fmt.Sprintf("%s · %s · %d messages · %d tools", queryLabel(t), t.Model.Name, len(t.Messages), len(t.Tools)))
 	if !a.debug.Load() {
 		return
 	}
@@ -78,8 +78,8 @@ func (a *application) logTask(site string, t task) {
 	for _, definition := range t.Tools {
 		tools = append(tools, definition.Name)
 	}
-	log.Printf("Modello %s · %d messaggi · temperatura %.2f · max %d token · contesto %d · strumenti: %s%s",
-		t.Model.Key, len(t.Messages), t.Temperature, t.MaxTokens, t.ContextTokens, strings.Join(tools, ", "), map[bool]string{true: " · risposta JSON con schema", false: ""}[t.Schema != nil])
+	log.Printf("Model %s · %d messages · temperature %.2f · max %d token · context %d · tools: %s%s",
+		t.Model.Key, len(t.Messages), t.Temperature, t.MaxTokens, t.ContextTokens, strings.Join(tools, ", "), map[bool]string{true: " · JSON response with schema", false: ""}[t.Schema != nil])
 	for i, m := range t.Messages {
 		// The last message is what this turn answers: in full (bounded); earlier ones shortened.
 		limit := 400
@@ -91,11 +91,11 @@ func (a *application) logTask(site string, t task) {
 			name = " " + m.Name
 		}
 		log.Printf("  [%d] %s%s: %s", i+1, m.Role, name, clip(m.Content, limit))
-		a.recordDetailed(site, fmt.Sprintf("Messaggio %d · %s%s", i+1, m.Role, name), clip(m.Content, limit))
+		a.recordDetailed(site, fmt.Sprintf("Message %d · %s%s", i+1, m.Role, name), clip(m.Content, limit))
 		for _, call := range m.ToolCalls {
 			arguments, _ := json.Marshal(call.Arguments)
-			log.Printf("      ↳ chiamata %s %s", call.Name, clip(string(arguments), 400))
-			a.recordDetailed(site, "Strumento: "+call.Name, clip(string(arguments), 400))
+			log.Printf("      ↳ call %s %s", call.Name, clip(string(arguments), 400))
+			a.recordDetailed(site, "Tool: "+call.Name, clip(string(arguments), 400))
 		}
 	}
 }
@@ -118,8 +118,8 @@ func (a *application) logThinking(site string, raw map[string]any) {
 	if len(parts) == 0 {
 		return
 	}
-	log.Printf("--- thinking ---\n%s\n--- fine thinking ---", strings.Join(parts, "\n"))
-	a.recordDetailed(site, "Ragionamento del modello", strings.Join(parts, "\n"))
+	log.Printf("--- thinking ---\n%s\n--- end thinking ---", strings.Join(parts, "\n"))
+	a.recordDetailed(site, "Model reasoning", strings.Join(parts, "\n"))
 }
 
 func (a *application) logAnswer(site string, result turn) {
@@ -127,15 +127,15 @@ func (a *application) logAnswer(site string, result turn) {
 		return
 	}
 	if result.Content != "" {
-		log.Printf("--- risposta ---\n%s\n--- fine risposta ---", result.Content)
-		a.recordDetailed(site, "Risposta del modello", result.Content)
+		log.Printf("--- response ---\n%s\n--- end response ---", result.Content)
+		a.recordDetailed(site, "Model response", result.Content)
 	}
 	for _, call := range result.ToolCalls {
 		arguments, _ := json.Marshal(call.Arguments)
-		log.Printf("Strumento richiesto al sito: %s %s", call.Name, string(arguments))
-		a.recordDetailed(site, "Strumento richiesto al sito: "+call.Name, string(arguments))
+		log.Printf("Tool requested from website: %s %s", call.Name, string(arguments))
+		a.recordDetailed(site, "Tool requested from website: "+call.Name, string(arguments))
 	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
-		log.Print("Risposta vuota del modello")
+		log.Print("Empty model response")
 	}
 }

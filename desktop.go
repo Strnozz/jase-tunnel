@@ -20,20 +20,20 @@ func pickModel(ctx context.Context, folder bool) (string, error) {
 		if folder {
 			kind = "folder"
 		}
-		command = exec.CommandContext(ctx, "/usr/bin/osascript", "-e", "POSIX path of (choose "+kind+" with prompt \"Scegli i pesi per Jase Tunnel\")")
+		command = exec.CommandContext(ctx, "/usr/bin/osascript", "-e", "POSIX path of (choose "+kind+" with prompt \"Choose weights for Jase Tunnel\")")
 	case "windows":
-		script := `Add-Type -AssemblyName System.Windows.Forms; $dialog=New-Object Windows.Forms.OpenFileDialog; $dialog.Title='Scegli i pesi per Jase Tunnel'; $dialog.Filter='Modelli GGUF (*.gguf)|*.gguf'; if($dialog.ShowDialog() -eq 'OK'){Write-Output $dialog.FileName}`
+		script := `Add-Type -AssemblyName System.Windows.Forms; $dialog=New-Object Windows.Forms.OpenFileDialog; $dialog.Title='Choose weights for Jase Tunnel'; $dialog.Filter='GGUF models (*.gguf)|*.gguf'; if($dialog.ShowDialog() -eq 'OK'){Write-Output $dialog.FileName}`
 		if folder {
-			script = `Add-Type -AssemblyName System.Windows.Forms; $dialog=New-Object Windows.Forms.FolderBrowserDialog; $dialog.Description='Scegli la cartella dei pesi per Jase Tunnel'; if($dialog.ShowDialog() -eq 'OK'){Write-Output $dialog.SelectedPath}`
+			script = `Add-Type -AssemblyName System.Windows.Forms; $dialog=New-Object Windows.Forms.FolderBrowserDialog; $dialog.Description='Choose a weights directory for Jase Tunnel'; if($dialog.ShowDialog() -eq 'OK'){Write-Output $dialog.SelectedPath}`
 		}
 		command = exec.CommandContext(ctx, "powershell.exe", "-STA", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();"+script)
 	default:
 		if path, err := exec.LookPath("zenity"); err == nil {
-			args := []string{"--file-selection", "--title=Scegli i pesi per Jase Tunnel"}
+			args := []string{"--file-selection", "--title=Choose weights for Jase Tunnel"}
 			if folder {
 				args = append(args, "--directory")
 			} else {
-				args = append(args, "--file-filter=Modelli GGUF | *.gguf")
+				args = append(args, "--file-filter=GGUF models | *.gguf")
 			}
 			command = exec.CommandContext(ctx, path, args...)
 		} else if path, err := exec.LookPath("kdialog"); err == nil {
@@ -45,17 +45,17 @@ func pickModel(ctx context.Context, folder bool) (string, error) {
 		}
 	}
 	if command == nil {
-		return "", errors.New("Il selettore file richiede Zenity o KDialog su Linux. Puoi importare il modello nel tuo motore locale e Jase Tunnel lo rileverà automaticamente.")
+		return "", errors.New("The file chooser requires Zenity or KDialog on Linux. You can import the model into your local engine and Jase Tunnel will detect it automatically.")
 	}
 	hideChildConsole(command)
 	output, err := command.Output()
 	if err != nil {
-		return "", errors.New("Selezione annullata.")
+		return "", errors.New("Selection cancelled.")
 	}
 	return strings.TrimSpace(string(output)), nil
 }
 
-var page = template.Must(template.New("status").Parse(`<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jase Tunnel</title><style>body{font:16px system-ui;background:#faf9f6;color:#252d28;max-width:620px;margin:8vh auto;padding:24px}h1{color:#e6632e}p{line-height:1.6}button{font:inherit;background:#fff;border:1px solid #d8dcd7;border-radius:12px;padding:12px 18px;margin:8px 8px 8px 0;cursor:pointer}#message{min-height:48px}</style><h1>Jase Tunnel</h1><h2>La tua LLM locale, sui siti che la accettano.</h2><p>L’app è aperta in background. Quando una pagina compatibile si annuncia, Jase Tunnel te lo segnala: il collegamento parte solo dopo la tua conferma e dura al massimo 30 minuti.</p><p id="message" role="status">Verifica dei modelli locali…</p><button id="file">Aggiungi file GGUF</button><button id="folder">Aggiungi cartella modello</button><button id="quit">Chiudi Jase Tunnel</button><script nonce="{{.Nonce}}">const message=document.getElementById('message');async function call(path,body={}){const r=await fetch('/v1/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(data.error?.message||'Operazione non riuscita');return data}async function status(){try{const r=await fetch('/v1/status');const d=await r.json();message.textContent=d.modelCount+' modelli locali rilevati. Apri Ollama o LM Studio per rendere disponibili i suoi modelli.'}catch{message.textContent='L’app è stata chiusa.'}}for(const id of ['file','folder'])document.getElementById(id).onclick=async()=>{message.textContent='Scegli il modello nella finestra del computer.';try{await call('add-model',{folder:id==='folder'});await status()}catch(e){message.textContent=e.message}};document.getElementById('quit').onclick=()=>call('quit').then(()=>message.textContent='App chiusa.');status();</script></html>`))
+var page = template.Must(template.New("status").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Jase Tunnel</title><style>body{font:16px system-ui;background:#faf9f6;color:#252d28;max-width:620px;margin:8vh auto;padding:24px}h1{color:#e6632e}p{line-height:1.6}button{font:inherit;background:#fff;border:1px solid #d8dcd7;border-radius:12px;padding:12px 18px;margin:8px 8px 8px 0;cursor:pointer}#message{min-height:48px}</style><h1>Jase Tunnel</h1><h2>Your local LLM, on websites that support it.</h2><p>The app is running in the background. When a compatible page announces itself, Jase Tunnel notifies you. Connections start only after your confirmation and last up to 30 minutes.</p><p id="message" role="status">Checking local models…</p><button id="file">Add GGUF file</button><button id="folder">Add model directory</button><button id="quit">Quit Jase Tunnel</button><script nonce="{{.Nonce}}">const message=document.getElementById('message');async function call(path,body={}){const r=await fetch('/v1/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(data.error?.message||'Operation failed');return data}async function status(){try{const r=await fetch('/v1/status');const d=await r.json();message.textContent=d.modelCount+' local models detected. Open Ollama or LM Studio to make its models available.'}catch{message.textContent='The app has closed.'}}for(const id of ['file','folder'])document.getElementById(id).onclick=async()=>{message.textContent='Choose a model in the app window.';try{await call('add-model',{folder:id==='folder'});await status()}catch(e){message.textContent=e.message}};document.getElementById('quit').onclick=()=>call('quit').then(()=>message.textContent='App closed.');status();</script></html>`))
 
 func (a *application) statusPage(w http.ResponseWriter) {
 	nonce := randomSecret()

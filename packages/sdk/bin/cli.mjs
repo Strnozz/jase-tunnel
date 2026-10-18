@@ -14,20 +14,20 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageJSON = JSON.parse(readFileSync(join(packageRoot,'package.json'),'utf8'));
 const inside = path => {
   const rel = relative(root, path);
-  if (rel.startsWith('..'+sep) || rel==='..' || resolve(path)===root) throw new Error('Il percorso deve restare nel progetto.');
+  if (rel.startsWith('..'+sep) || rel==='..' || resolve(path)===root) throw new Error('The path must stay inside the project.');
   let current=path;
-  while (current!==root) { if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error('I percorsi simbolici non vengono modificati.'); current=dirname(current); }
+  while (current!==root) { if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error('Symbolic links are not modified.'); current=dirname(current); }
   return path;
 };
 const registry = () => existsSync(registryFile) ? JSON.parse(readFileSync(registryFile,'utf8')) : { version:1, tools:[] };
 function generated(entries, typescript=true) {
   const imports=[], bindings=[];
   entries.filter(t=>t.enabled!==false).forEach((t,index)=>{
-    const target=inside(resolve(root,t.file)); if (!existsSync(target)) throw new Error(`Modulo mancante: ${t.file}`);
+    const target=inside(resolve(root,t.file)); if (!existsSync(target)) throw new Error(`Missing module: ${t.file}`);
     let path=relative(join(root,'.jase-tunnel'),target).split(sep).join('/');
     if(typescript)path=path.replace(/\.(?:[cm]?ts|tsx|jsx)$/,'');
     if (!path.startsWith('.')) path='./'+path;
-    if (!/^[A-Za-z_$][\w$]*$/.test(t.export) || (t.path??[]).some(p=>['__proto__','constructor','prototype'].includes(p))) throw new Error('Riferimento allo strumento non valido.');
+    if (!/^[A-Za-z_$][\w$]*$/.test(t.export) || (t.path??[]).some(p=>['__proto__','constructor','prototype'].includes(p))) throw new Error('Invalid tool reference.');
     imports.push(`import { ${t.export} as tool${index} } from ${JSON.stringify(path)};`);
     const access=(t.path??[]).map(p=>`[${JSON.stringify(p)}]`).join('');
     const options={
@@ -45,9 +45,9 @@ function commitFiles(changes, validateOnly = false) {
   // Validate every conflict before writing anything. Keep backups of user-owned files.
   for (const [path,content,owned] of changes) {
     inside(path);
-    if (existsSync(path) && readFileSync(path,'utf8')!==content && !owned) throw new Error(`Il file esiste già: ${relative(root,path)}. Nessuna sovrascrittura automatica.`);
+    if (existsSync(path) && readFileSync(path,'utf8')!==content && !owned) throw new Error(`File already exists: ${relative(root,path)}. Existing files are not overwritten automatically.`);
   }
-  if (flag('--dry-run')) { for(const [path] of changes) console.log(`Creerebbe/aggiornerebbe ${relative(root,path)}`); return; }
+  if (flag('--dry-run')) { for(const [path] of changes) console.log(`Would create/update ${relative(root,path)}`); return; }
   if (validateOnly) return;
   const backup=join(root,'.jase-tunnel','backups',String(Date.now()));
   for (const [path,content] of changes) {
@@ -58,18 +58,18 @@ function commitFiles(changes, validateOnly = false) {
 }
 function toolChanges(tools,typescript=true) {
   const generatedPath=join(root,'.jase-tunnel',`tools.${typescript?'ts':'mjs'}`);
-  if (existsSync(generatedPath) && !readFileSync(generatedPath,'utf8').startsWith(marker)) throw new Error('Il registro generato è stato sostituito: preservato.');
+  if (existsSync(generatedPath) && !readFileSync(generatedPath,'utf8').startsWith(marker)) throw new Error('The generated registry was replaced; the existing file was preserved.');
   return [[registryFile,JSON.stringify({version:1,tools},null,2)+'\n',true],[generatedPath,generated(tools,typescript),true]];
 }
 function mergeScan() {
   const scan=discoverTools(root), saved=registry();
-  if(saved.version!==1 || !Array.isArray(saved.tools)) throw new Error('Registro strumenti non valido.');
+  if(saved.version!==1 || !Array.isArray(saved.tools)) throw new Error('Invalid tool registry.');
   // A newly found tool starts disabled; choices already made (enable, public, read-only) stay.
   const tools=[...saved.tools.filter(t=>t.manual),...scan.tools.map(t=>{
     const old=saved.tools.find(o=>!o.manual && o.name===t.name);
     return {...t,enabled:old?.enabled??false,...(old?.public?{public:true}:{}),...(old?.readOnly?{readOnly:true}:{})};
   })];
-  if(new Set(tools.map(t=>t.name)).size!==tools.length) throw new Error('Nomi strumenti duplicati nel registro.');
+  if(new Set(tools.map(t=>t.name)).size!==tools.length) throw new Error('Duplicate tool names in the registry.');
   scan.warnings.forEach(w=>console.warn(w));
   return tools;
 }
@@ -160,7 +160,7 @@ function serverChanges(server, configPath, typescript) {
     edits.push([statement.end,`\n${indent}${server.app}.use((req, res, next) => jaseTunnel.then(handle => handle(req, res, next), next));`]);
   } else {
     const handler=[...server.call.arguments].reverse().find(a=>ts.isArrowFunction(a)||ts.isFunctionExpression(a)||ts.isIdentifier(a));
-    if(!handler) throw new Error(`${relative(root,server.file)}: createServer senza funzione di gestione. Collega a mano withJaseTunnel da jase-tunnel/node.`);
+    if(!handler) throw new Error(`${relative(root,server.file)}: createServer has no request handler. Wire withJaseTunnel from jase-tunnel/node manually.`);
     edits.push([handler.getStart(server.ast),'withJaseTunnel('],[handler.end,')']);
   }
   let text=server.source;
@@ -187,21 +187,21 @@ function serverlessHosts(pkg) {
   if(has('vercel.json')||has('.vercel')) found.push('Vercel');
   if(has('netlify.toml')||depends('@netlify')) found.push('Netlify');
   if(has('wrangler.toml')||has('wrangler.json')||has('wrangler.jsonc')||depends('@opennextjs')) found.push('Cloudflare Workers');
-  if(has('serverless.yml')||has('serverless.yaml')||has('sst.config.ts')||has('amplify.yml')) found.push('funzioni serverless');
+  if(has('serverless.yml')||has('serverless.yaml')||has('sst.config.ts')||has('amplify.yml')) found.push('serverless functions');
   return found;
 }
 function toolSummary(tools) {
   const enabled=tools.filter(t=>t.enabled!==false), waiting=tools.filter(t=>t.enabled===false);
-  const lines=[`Jase Tunnel: ${tools.length} strumenti nel registro, ${enabled.length} abilitati.`];
-  if(waiting.length) lines.push(`Da valutare (disabilitati): ${waiting.map(t=>t.name).join(', ')}.`);
-  lines.push('Attenzione: il modello gira sul computer del visitatore, quindi è il visitatore a decidere quali strumenti chiamare e con quali argomenti.',
-    'Abilita solo gli strumenti che controllano la sessione con authorize(context, args) o che sono sicuri per chiunque:',
-    '  npx jase-tunnel tools enable <nome>             (lo strumento ha authorize)',
-    '  npx jase-tunnel tools enable <nome> --public    (sicuro per qualsiasi visitatore)');
+  const lines=[`Jase Tunnel: ${tools.length} tools in the registry, ${enabled.length} enabled.`];
+  if(waiting.length) lines.push(`Review before enabling (disabled): ${waiting.map(t=>t.name).join(', ')}.`);
+  lines.push('Warning: the model runs on the visitor’s computer, so the visitor decides which tools to call and with which arguments.',
+    'Only enable tools that check the session with authorize(context, args), or that are safe for everyone:',
+    '  npx jase-tunnel tools enable <name>             (the tool has authorize)',
+    '  npx jase-tunnel tools enable <name> --public    (safe for any visitor)');
   return lines.join('\n');
 }
 function init() {
-  if(!existsSync(pkgFile)) throw new Error('Apri il terminale nella cartella del progetto Node.js.');
+  if(!existsSync(pkgFile)) throw new Error('Open a terminal in the Node.js project directory.');
   const pkg=JSON.parse(readFileSync(pkgFile,'utf8'));
   const depends=name=>!!(pkg.dependencies?.[name] ?? pkg.devDependencies?.[name]);
   const next=depends('next');
@@ -209,17 +209,17 @@ function init() {
   const typescript=existsSync(join(root,'tsconfig.json'));
   const extension=typescript?'ts':'js', configName=`jase-tunnel.config.${typescript?'ts':'mjs'}`, configPath=join(root,configName);
   const tools=mergeScan(), changes=toolChanges(tools,typescript);
-  changes.push([configPath,`import { defineSite } from 'jase-tunnel/server';\nimport { tools } from './.jase-tunnel/tools${typescript?'':'.mjs'}';\n\nexport default defineSite({ name: ${JSON.stringify(String(pkg.name??'Il mio servizio').slice(0,80))}, origin: process.env.JASE_TUNNEL_ORIGIN, tools });\n`,false]);
+  changes.push([configPath,`import { defineSite } from 'jase-tunnel/server';\nimport { tools } from './.jase-tunnel/tools${typescript?'':'.mjs'}';\n\nexport default defineSite({ name: ${JSON.stringify(String(pkg.name??'My website').slice(0,80))}, origin: process.env.JASE_TUNNEL_ORIGIN, tools });\n`,false]);
   let summary;
   if(next && app) {
     const layout=['layout.tsx','layout.jsx','layout.js'].map(p=>join(app,p)).find(existsSync);
-    if(!layout) throw new Error('Layout Next.js non trovato: usa un layout App Router prima di init.');
+    if(!layout) throw new Error('Next.js layout not found: add an App Router layout before running init.');
     const source=readFileSync(layout,'utf8');
     if(!source.includes("jase-tunnel/react")) {
       const ast=ts.createSourceFile(layout,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
       let end;
       const visit=n=>{if(ts.isJsxElement(n) && n.openingElement.tagName.getText(ast)==='body') end=n.closingElement.getStart(ast); ts.forEachChild(n,visit);}; visit(ast);
-      if(end===undefined) throw new Error('Body del layout non riconosciuto. Nessun file modificato: integra <JaseTunnel /> dal modulo React.');
+      if(end===undefined) throw new Error('Layout body not recognized. No files were changed: add <JaseTunnel /> from the React module manually.');
       const body=source.slice(0,end)+'<JaseTunnel />'+source.slice(end);
       const anchor=ast.statements.find(s=>!ts.isExpressionStatement(s) || !ts.isStringLiteral(s.expression))?.getStart(ast)??0;
       changes.push([layout,body.slice(0,anchor)+"import { JaseTunnel } from 'jase-tunnel/react';\n"+body.slice(anchor),true]);
@@ -229,17 +229,17 @@ function init() {
       const code=`import site from ${JSON.stringify(imp)};\nexport const runtime = 'nodejs';\nexport const dynamic = 'force-dynamic';\nexport const GET = ${typescript?'(request: Request)':'request'} => site.handle(request);\n${method.includes('POST')?'export const POST = GET;\n':''}`;
       changes.push([join(directory,`route.${extension}`),code,false]);
     }
-    summary='Pulsante, pannello e broker Next.js configurati.';
-  } else if(next) throw new Error('L’installazione automatica richiede Next.js App Router. Nessun file modificato.');
+    summary='Next.js button, panel and broker configured.';
+  } else if(next) throw new Error('Automatic installation requires Next.js App Router. No files were changed.');
   else {
     const server=findServer();
     if(server) {
       changes.push(...serverChanges(server,configPath,typescript));
-      summary=`Broker collegato a ${server.kind==='express'?'Express':'node:http'} in ${relative(root,server.file)}.`;
-    } else summary='Server non riconosciuto: importa jase-tunnel.config nel tuo server e inoltra le Request a site.handle(request), oppure usa nodeMiddleware da jase-tunnel/node.';
+      summary=`Broker connected to ${server.kind==='express'?'Express':'node:http'} in ${relative(root,server.file)}.`;
+    } else summary='Server not recognized: import jase-tunnel.config in your server and forward requests to site.handle(request), or use nodeMiddleware from jase-tunnel/node.';
     const pages=pageChanges();
     changes.push(...pages);
-    summary+=pages.length?` Pannello aggiunto a ${pages.length} ${pages.length===1?'pagina':'pagine'}.`:pages.present?' Pannello già presente nelle pagine.':` Aggiungi il pannello alle tue pagine prima di </body>:\n  ${widgetTag}`;
+    summary+=pages.length?` Panel added to ${pages.length} ${pages.length===1?'page':'pages'}.`:pages.present?' Panel already present on the pages.':` Add the panel to your pages before </body>:\n  ${widgetTag}`;
   }
   const ignore=join(root,'.gitignore'), old=existsSync(ignore)?readFileSync(ignore,'utf8'):'';
   changes.push([ignore,old+(old.includes('.jase-tunnel/backups/')?'':`${old.endsWith('\n')||!old?'':'\n'}.jase-tunnel/backups/\n`),true]);
@@ -248,15 +248,15 @@ function init() {
   if(!flag('--dry-run') && !flag('--skip-install')) {
     const spec=option('--package')??`${packageJSON.name}@${packageJSON.version}`;
     const npmCLI=[process.env.npm_execpath?.replace(/npx-cli\.js$/,'npm-cli.js'),join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js')].find(p=>p&&existsSync(p));
-    if(process.platform==='win32'&&!npmCLI) throw new Error('Percorso npm non disponibile. Avvia init tramite npx.');
+    if(process.platform==='win32'&&!npmCLI) throw new Error('Percorso npm unavailable. Avvia init tramite npx.');
     const installArgs=['install','--ignore-scripts','--no-audit','--no-fund','--save-exact',spec];
     const result=spawnSync(npmCLI?process.execPath:'npm',npmCLI?[npmCLI,...installArgs]:installArgs,{cwd:root,stdio:'inherit',shell:false});
-    if(result.error||result.status!==0) throw new Error('Installazione dipendenza non completata. Nessun file del progetto è stato modificato. Riprova init --package <pacchetto>.');
+    if(result.error||result.status!==0) throw new Error('Dependency installation failed. No project files were changed. Retry init --package <package>.');
   }
   if(!flag('--dry-run')) commitFiles(changes);
-  console.log(`${summary}\nI visitatori con Jase Tunnel aperto vengono avvisati quando visitano le tue pagine.\n\n${toolSummary(tools)}\n\nScansione aggiornata: npx jase-tunnel tools scan\nAggiunta manuale: npx jase-tunnel tools add ./src/tools.ts#strumento [--public]`);
+  console.log(`${summary}\nVisitors running Jase Tunnel are notified when they visit your pages.\n\n${toolSummary(tools)}\n\nRefresh the scan: npx jase-tunnel tools scan\nAdd manually: npx jase-tunnel tools add ./src/tools.ts#tool [--public]`);
   const hosts=serverlessHosts(pkg);
-  if(hosts.length) console.warn(`\nAttenzione: configurazione per ${hosts.join(', ')} rilevata. Il broker di Jase Tunnel tiene le richieste nella memoria di un solo processo Node: con funzioni serverless o più istanze i collegamenti non funzionano. Serve un server Node persistente con una sola istanza (o affinità delle richieste).`);
+  if(hosts.length) console.warn(`\nWarning: ${hosts.join(', ')} configuration detected. The Jase Tunnel broker keeps requests in one Node process: connections do not work with serverless functions or multiple instances. Use a persistent Node server with one instance (or request affinity).`);
 }
 try {
   const command=args[0];
@@ -266,24 +266,24 @@ try {
     if(operation==='list') console.log(JSON.stringify(registry().tools,null,2));
     else if(operation==='scan') { const tools=mergeScan(); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); console.log(toolSummary(tools)); }
     else if(operation==='add') {
-      const reference=args[2]??'', split=reference.lastIndexOf('#'); if(split<1) throw new Error('Usa tools add ./percorso.ts#export [--name nome] [--schema ./schema.json] [--description testo]');
+      const reference=args[2]??'', split=reference.lastIndexOf('#'); if(split<1) throw new Error('Use tools add ./path.ts#export [--name name] [--schema ./schema.json] [--description text]');
       const file=inside(resolve(root,reference.slice(0,split))), exported=reference.slice(split+1);
-      if(!existsSync(file)) throw new Error('Modulo non trovato.');
+      if(!existsSync(file)) throw new Error('Module not found.');
       const names=exported.split('.'), name=option('--name')??names.at(-1).replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase();
-      if(!/^[a-z][a-z0-9_]{1,40}$/.test(name)) throw new Error('Nome strumento non valido.');
+      if(!/^[a-z][a-z0-9_]{1,40}$/.test(name)) throw new Error('Invalid tool name.');
       const entry={name,file:relative(root,file).split(sep).join('/'),export:names[0],path:names.slice(1),manual:true,enabled:true,...(flag('--public')?{public:true}:{})};
       if(option('--schema')) entry.parameters=JSON.parse(readFileSync(inside(resolve(root,option('--schema'))),'utf8'));
       if(option('--description')) entry.description=option('--description');
       if(flag('--read-only')) entry.readOnly=true;
       const saved=registry().tools.filter(t=>t.name!==name); saved.push(entry); commitFiles(toolChanges(saved,existsSync(join(root,'tsconfig.json'))));
-      console.log(`Aggiunto ${name}.${entry.public?' Chiamabile da qualsiasi visitatore.':' Se lo strumento non ha authorize(context, args), il server lo rifiuterà all’avvio: aggiungilo o usa --public.'}`);
+      console.log(`Added ${name}.${entry.public?' Callable by any visitor.':' If the tool lacks authorize(context, args), the server will reject it at startup: add it or use --public.'}`);
     } else if(operation==='enable') {
       const tools=registry().tools, entry=tools.find(t=>t.name===args[2]);
-      if(!entry) throw new Error(`Strumento non trovato: ${args[2]??''}. Elenco: npx jase-tunnel tools list`);
-      if(!flag('--public') && !entry.public && entry.authorize===false) throw new Error(`${entry.name} non ha authorize(context, args): qualsiasi visitatore potrebbe chiamarlo con argomenti a sua scelta. Aggiungi authorize e ripeti tools scan, oppure usa --public se è sicuro per chiunque.`);
+      if(!entry) throw new Error(`Tool not found: ${args[2]??''}. List tools: npx jase-tunnel tools list`);
+      if(!flag('--public') && !entry.public && entry.authorize===false) throw new Error(`${entry.name} lacks authorize(context, args): any visitor could call it with arbitrary arguments. Add authorize and rerun tools scan, or use --public if it is safe for everyone.`);
       const updated=tools.map(t=>t===entry?{...t,enabled:true,...(flag('--public')?{public:true}:{}),...(flag('--read-only')?{readOnly:true}:{})}:t);
-      commitFiles(toolChanges(updated,existsSync(join(root,'tsconfig.json')))); console.log(`Abilitato ${entry.name}.`);
+      commitFiles(toolChanges(updated,existsSync(join(root,'tsconfig.json')))); console.log(`Enabled ${entry.name}.`);
     } else if(operation==='remove') { const tools=registry().tools.map(t=>t.name===args[2]?{...t,enabled:false}:t); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); }
-    else throw new Error('Usa tools scan, list, add, enable o remove.');
-  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <pacchetto o tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name nome] [--schema ./schema.json] [--description testo] [--read-only] [--public]\n  tools enable nome [--public] [--read-only]\n  tools remove nome');
+    else throw new Error('Use tools scan, list, add, enable or remove.');
+  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <package or tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name name] [--schema ./schema.json] [--description text] [--read-only] [--public]\n  tools enable name [--public] [--read-only]\n  tools remove name');
 } catch(error) { console.error(`Jase Tunnel: ${error.message}`); process.exitCode=1; }

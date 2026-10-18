@@ -1,11 +1,11 @@
 Jase Tunnel
 Copyright 2026 Simone Romano
 
-Questo prodotto è distribuito con la Apache License, Version 2.0 (file LICENSE).
+This product is distributed under the Apache License, Version 2.0 (see LICENSE).
 
-Il nome «Jase Tunnel», il logo e gli altri segni identificativi del progetto non
-sono concessi dalla Apache License: il loro uso è regolato da TRADEMARK_POLICY.md.
+The Jase Tunnel name, logo and other project identifiers are not granted by the
+Apache License. Their use is governed by TRADEMARK_POLICY.md.
 
-Le build per Linux includono purego (https://github.com/ebitengine/purego),
-Copyright The Ebitengine Authors, distribuito con la Apache License, Version 2.0.
-Dettagli in THIRD_PARTY_NOTICES.md e third_party/purego-LICENSE.
+Linux builds include purego (https://github.com/ebitengine/purego),
+Copyright The Ebitengine Authors, under the Apache License, Version 2.0.
+See THIRD_PARTY_NOTICES.md and third_party/purego-LICENSE.

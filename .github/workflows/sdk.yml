@@ -77,7 +77,7 @@ jobs:
           import fs from 'node:fs';
           const notesPath = `docs/releases/${process.env.RELEASE_TAG}.md`;
           const notes = fs.existsSync(notesPath) ? '\n' + fs.readFileSync(notesPath, 'utf8') : '';
-          fs.writeFileSync('.deploy-check/sdk-notes.md', `Jase Tunnel SDK\n\nCommit: ${process.env.RELEASE_COMMIT}\nBuild: ${process.env.RELEASE_RUN}\n\nPacchetto npm: npx jase-tunnel init. Richiede Jase Tunnel 0.3.0 o successivo sul computer dei visitatori.\n` + notes);
+          fs.writeFileSync('.deploy-check/sdk-notes.md', `Jase Tunnel SDK\n\nCommit: ${process.env.RELEASE_COMMIT}\nBuild: ${process.env.RELEASE_RUN}\n\nnpm package: npx jase-tunnel init. Requires Jase Tunnel 0.3.0 or later on visitors’ computers.\n` + notes);
           JS
           gh release create "$RELEASE_TAG" .deploy-check/jase-tunnel-*.tgz .deploy-check/SHA256SUMS --verify-tag --target "$RELEASE_COMMIT" --draft --title "Jase Tunnel SDK $RELEASE_TAG" --notes-file .deploy-check/sdk-notes.md
           gh release edit "$RELEASE_TAG" --draft=false --latest=false

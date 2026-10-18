@@ -21,22 +21,22 @@ function el(tag, props = {}, ...children) {
 
 export function mountJaseTunnel({ path = '/api/jase-tunnel/v1/', container } = {}) {
   const state = { open: false, session: null, release: null, platform: undefined, history: [], pending: null, busy: false, destroyed: false };
-  const client = new TunnelClient({ path, onState: s => { if (s.state === 'awaiting_approval') { state.open = true; say('Conferma il dominio e scegli il modello nell’app Jase Tunnel.'); } } });
+  const client = new TunnelClient({ path, onState: s => { if (s.state === 'awaiting_approval') { state.open = true; say('Confirm the domain and choose a model in the Jase Tunnel app.'); } } });
 
-  const status = el('p', { role: 'status' }, 'Questo sito accetta Jase Tunnel: usa la LLM del tuo computer, senza registrazione.');
-  const connectButton = el('button', { type: 'button', style: button }, 'Collega il mio modello');
+  const status = el('p', { role: 'status' }, 'This website supports Jase Tunnel: use the LLM on your computer, without signing up.');
+  const connectButton = el('button', { type: 'button', style: button }, 'Connect my model');
   const downloads = el('div');
-  const offline = el('div', {}, el('p', {}, 'Apri Jase Tunnel sul computer, poi premi Collega. Il browser potrebbe chiedere l’accesso al servizio locale.'), connectButton, downloads);
+  const offline = el('div', {}, el('p', {}, 'Open Jase Tunnel on your computer, then click Connect. Your browser may ask for access to the local service.'), connectButton, downloads);
   const modelLine = el('p');
   const history = el('div');
   const pending = el('div');
   const input = el('textarea', { maxlength: 16000, style: 'display:block;width:100%;box-sizing:border-box;min-height:70px;margin-top:6px;font:inherit;border:1px solid #ddd;border-radius:8px;padding:8px' });
-  const send = el('button', { type: 'submit', style: button }, 'Invia');
-  const form = el('form', {}, el('label', {}, 'Chiedi al tuo modello', input), send);
-  const disconnect = el('button', { type: 'button', style: button + ';margin-top:10px' }, 'Scollega');
+  const send = el('button', { type: 'submit', style: button }, 'Send');
+  const form = el('form', {}, el('label', {}, 'Ask your model', input), send);
+  const disconnect = el('button', { type: 'button', style: button + ';margin-top:10px' }, 'Disconnect');
   const online = el('div', {}, modelLine, history, pending, form, disconnect);
-  const close = el('button', { type: 'button', style: button, 'aria-label': 'Chiudi pannello' }, '×');
-  const panel = el('section', { 'aria-label': 'Pannello Jase Tunnel', style: 'width:min(360px, calc(100vw - 40px));max-height:75vh;overflow-y:auto;padding:18px;background:#fff;border:1px solid #ddd;border-radius:18px;box-shadow:0 12px 50px #0002;margin-bottom:10px' },
+  const close = el('button', { type: 'button', style: button, 'aria-label': 'Close panel' }, '×');
+  const panel = el('section', { 'aria-label': 'Jase Tunnel panel', style: 'width:min(360px, calc(100vw - 40px));max-height:75vh;overflow-y:auto;padding:18px;background:#fff;border:1px solid #ddd;border-radius:18px;box-shadow:0 12px 50px #0002;margin-bottom:10px' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:center' }, el('strong', {}, 'Jase Tunnel'), close), status, offline, online);
   const toggle = el('button', { type: 'button', style: button + ';box-shadow:0 3px 15px #0002', 'aria-expanded': 'false' }, 'Jase Tunnel');
   const root = el('aside', { 'aria-label': 'Jase Tunnel', style: 'position:fixed;right:20px;bottom:20px;z-index:2147483000;font-family:system-ui,sans-serif;font-size:14px;line-height:1.5;color:#222' }, panel, toggle);
@@ -48,23 +48,23 @@ export function mountJaseTunnel({ path = '/api/jase-tunnel/v1/', container } = {
     const connected = !!state.session?.connected, model = state.session?.models?.find(m => m.available);
     panel.hidden = !state.open; toggle.setAttribute('aria-expanded', String(state.open));
     offline.hidden = connected; online.hidden = !connected;
-    connectButton.disabled = state.busy; connectButton.textContent = state.busy ? 'Collegamento…' : 'Collega il mio modello';
+    connectButton.disabled = state.busy; connectButton.textContent = state.busy ? 'Connecting…' : 'Connect my model';
     const available = state.release?.downloads?.filter(d => d.available) ?? [], detected = available.find(d => d.id === state.platform);
     downloads.replaceChildren(...[
-      detected && el('p', {}, el('a', { href: path + 'download?target=' + encodeURIComponent(detected.id) }, 'Scarica per ' + detected.label)),
-      available.length && el('details', {}, el('summary', {}, detected ? 'Altri sistemi operativi' : 'Scarica Jase Tunnel'), ...available.map(d => el('p', {}, el('a', { href: path + 'download?target=' + encodeURIComponent(d.id) }, d.label)))),
+      detected && el('p', {}, el('a', { href: path + 'download?target=' + encodeURIComponent(detected.id) }, 'Download for ' + detected.label)),
+      available.length && el('details', {}, el('summary', {}, detected ? 'Other operating systems' : 'Download Jase Tunnel'), ...available.map(d => el('p', {}, el('a', { href: path + 'download?target=' + encodeURIComponent(d.id) }, d.label)))),
       state.release?.message && el('p', {}, state.release.message),
-      !available.length && el('a', { href: releasesPage, target: '_blank', rel: 'noopener noreferrer' }, 'Download e versioni su GitHub')
+      !available.length && el('a', { href: releasesPage, target: '_blank', rel: 'noopener noreferrer' }, 'Downloads and releases on GitHub')
     ].filter(Boolean));
-    modelLine.textContent = model ? `Modello: ${model.label}` : 'Modello non pronto. Apri Ollama o LM Studio e ricollega il tunnel.';
+    modelLine.textContent = model ? `Model: ${model.label}` : 'Model not ready. Open Ollama or LM Studio and reconnect the tunnel.';
     history.replaceChildren(...state.history.map(item => el('p', { style: 'white-space:pre-wrap;overflow-wrap:anywhere' }, el('strong', {}, item.role + ': '), item.text)));
     pending.replaceChildren(...(state.pending ? [
-      el('p', {}, 'Consenti queste chiamate agli strumenti del servizio?'),
+      el('p', {}, 'Allow these calls to the website’s tools?'),
       el('pre', { style: 'white-space:pre-wrap;font-size:12px' }, JSON.stringify(state.pending.calls, null, 2)),
-      ...[[true, 'Consenti'], [false, 'Rifiuta']].map(([allow, label]) => el('button', { type: 'button', style: button, disabled: state.busy, onclick: () => act(async () => answer(await client.confirm(state.pending.id, allow))) }, label))
+      ...[[true, 'Allow'], [false, 'Decline']].map(([allow, label]) => el('button', { type: 'button', style: button, disabled: state.busy, onclick: () => act(async () => answer(await client.confirm(state.pending.id, allow))) }, label))
     ] : []));
     input.disabled = state.busy || !!state.pending;
-    send.disabled = state.busy || !model || !!state.pending; send.textContent = state.busy ? 'Risposta in corso…' : 'Invia';
+    send.disabled = state.busy || !model || !!state.pending; send.textContent = state.busy ? 'Generating response…' : 'Send';
     disconnect.disabled = state.busy;
   }
   async function act(fn) {
@@ -73,20 +73,20 @@ export function mountJaseTunnel({ path = '/api/jase-tunnel/v1/', container } = {
     finally { state.busy = false; render(); }
   }
   function answer(result) {
-    if (result.confirmation) { state.pending = result.confirmation; say('Lo strumento richiede la tua conferma.'); return; }
-    state.pending = null; state.history.push({ role: 'Jase Tunnel', text: result.content }); say('Risposta dal tuo modello locale.');
+    if (result.confirmation) { state.pending = result.confirmation; say('This tool requires your confirmation.'); return; }
+    state.pending = null; state.history.push({ role: 'Jase Tunnel', text: result.content }); say('Response from your local model.');
   }
-  function connected(session) { state.session = session; state.open = true; say('Computer collegato.'); }
+  function connected(session) { state.session = session; state.open = true; say('Computer connected.'); }
 
   toggle.addEventListener('click', () => { state.open = !state.open; render(); });
   close.addEventListener('click', () => { state.open = false; render(); });
   connectButton.addEventListener('click', () => act(async () => connected(await client.connect())));
-  disconnect.addEventListener('click', () => act(async () => { await client.disconnect(); state.session = null; state.pending = null; say('Computer scollegato.'); }));
+  disconnect.addEventListener('click', () => act(async () => { await client.disconnect(); state.session = null; state.pending = null; say('Computer disconnected.'); }));
   form.addEventListener('submit', event => {
     event.preventDefault();
     const model = state.session?.models?.find(m => m.available), text = input.value;
     if (!text.trim() || !model || state.pending) return;
-    input.value = ''; state.history.push({ role: 'Tu', text });
+    input.value = ''; state.history.push({ role: 'You', text });
     void act(async () => answer(await client.chat(model.id, text)));
   });
 

@@ -1,71 +1,71 @@
 # jase-tunnel
 
-Il modulo per i servizi web che vogliono usare la LLM locale dei propri visitatori tramite l’app [Jase Tunnel](https://github.com/Strnozz/jase-tunnel). Strumenti, dati e autorizzazioni restano sul server del servizio; l’inferenza avviene sul computer del visitatore, dopo il suo consenso. Nessuna API di inferenza esterna, account o relay.
+The SDK for websites that want to use visitors’ local LLMs through the [Jase Tunnel desktop app](https://github.com/Strnozz/jase-tunnel). Tools, data and authorization stay on the provider’s server; inference runs on the visitor’s computer after consent. No external inference API, Tunnel account or relay is required. The website keeps its own authentication requirements.
 
-## Un comando nel progetto
+## One command in your project
 
 ```sh
 npx jase-tunnel init
 ```
 
-Node.js 22 o successivo. `init`:
+Requires Node.js 22 or later. `init`:
 
-1. installa la dipendenza `jase-tunnel` con versione fissata (gli script di installazione npm non vengono eseguiti);
-2. rileva gli strumenti IA esportati dal progetto e li registra **disabilitati** in `jase-tunnel.tools.json`, poi scrive `jase-tunnel.config`;
-3. collega manifest e broker al server;
-4. aggiunge il pannello alle pagine.
+1. installs a pinned `jase-tunnel` dependency, without running npm installation scripts;
+2. discovers exported AI tools, registers them as **disabled** in `jase-tunnel.tools.json`, and writes `jase-tunnel.config`;
+3. mounts the manifest and broker;
+4. adds the panel to your pages.
 
-| Progetto | Server | Pannello |
+| Project | Server | Panel |
 | --- | --- | --- |
-| **Next.js App Router** | Route `/.well-known/jase-tunnel.json` e `/api/jase-tunnel/v1/[...path]` | `<JaseTunnel />` nel layout |
-| **Express** | Una riga `app.use(...)` subito dopo `express()`, prima degli altri middleware | Script nei file HTML e nei template |
-| **`node:http`** | Il gestore passato a `createServer` viene avvolto | Script nei file HTML e nei template |
+| **Next.js App Router** | `/.well-known/jase-tunnel.json` and `/api/jase-tunnel/v1/[...path]` routes | `<JaseTunnel />` in the layout |
+| **Express** | Middleware immediately after `express()`, before other middleware | Script in HTML files and templates |
+| **`node:http`** | Wraps the handler passed to `createServer` | Script in HTML files and templates |
 
-Se il progetto è configurato per Vercel, Netlify, Cloudflare Workers o altre funzioni serverless, `init` avvisa che il broker non può funzionare lì (vedi in fondo).
+`init` warns when a project targets Vercel, Netlify, Cloudflare Workers or other serverless functions; the broker cannot run there. See the hosting limits below.
 
-Il server carica il modulo con `import()` dinamico, quindi la stessa riga funziona in CommonJS e in ESM. I file HTML e i template riconosciuti sono `.html`, `.ejs`, `.hbs`, `.njk`, `.liquid` e `.mustache` con `</body>`; se non ce ne sono, `init` stampa il tag da aggiungere:
+The server uses dynamic `import()`, supporting CommonJS and ESM. Recognized templates are `.html`, `.ejs`, `.hbs`, `.njk`, `.liquid` and `.mustache` files containing `</body>`. Otherwise, `init` prints the tag to add:
 
 ```html
 <script type="module" src="/api/jase-tunnel/v1/client/widget.mjs"></script>
 ```
 
-I file esistenti in conflitto vengono conservati e segnalati prima di scrivere. Server, layout, pagine e registri modificati hanno una copia in `.jase-tunnel/backups/`, esclusa da Git. Ripetere `init` non duplica le modifiche. `--dry-run` mostra i file previsti senza scrivere o installare. `--cwd <cartella>` seleziona il progetto. `--package <pacchetto o tarball>` installa un’altra versione o un pacchetto locale.
+Conflicting existing files are reported before any writes. Modified server files, layouts, pages and registries are backed up in `.jase-tunnel/backups/`, excluded from Git. Repeating `init` does not duplicate changes. `--dry-run` lists planned changes without writing or installing; `--cwd <directory>` selects a project; `--package <package or tarball>` selects another SDK version or local package.
 
-Per i progetti TypeScript con Express o `node:http` la configurazione è `jase-tunnel.config.ts`, importata senza estensione: funziona con `tsx`, `ts-node` o una compilazione CommonJS. Con una compilazione ESM in `dist/` va corretto il percorso dell’import. Per altri server il nucleo accetta le API Fetch standard:
+TypeScript Express and `node:http` projects use `jase-tunnel.config.ts`, imported without an extension. This works with `tsx`, `ts-node` or CommonJS compilation. ESM compilation into `dist/` requires adjusting the import path. Other servers can use standard Fetch APIs:
 
 ```ts
 import site from './jase-tunnel.config';
-const response = await site.handle(request); // inoltra il manifest e /api/jase-tunnel/v1/*
+const response = await site.handle(request); // forward the manifest and /api/jase-tunnel/v1/*
 ```
 
-Per Express o `node:http` collegati a mano: `nodeMiddleware(site)` e `withJaseTunnel(site, handler)` da `jase-tunnel/node`. Nel frontend: `JaseTunnel` da `jase-tunnel/react`, `mountJaseTunnel` da `jase-tunnel/widget` oppure `TunnelClient` da `jase-tunnel/browser`. L’installazione automatica non è dichiarata per Python, PHP, Ruby, Next Pages Router o router server sconosciuti.
+Manual Node integration: `nodeMiddleware(site)` and `withJaseTunnel(site, handler)` from `jase-tunnel/node`. Frontend APIs: `JaseTunnel` from `jase-tunnel/react`, `mountJaseTunnel` from `jase-tunnel/widget`, or `TunnelClient` from `jase-tunnel/browser`. Automatic installation is not claimed for Python, PHP, Ruby, Next Pages Router or unknown server routers.
 
-## Sicurezza degli strumenti: il modello è del visitatore
+## Tool security: the visitor controls the model
 
-Il modello gira sul computer del visitatore. Il visitatore può sostituirlo, o rispondere al broker al posto suo, e quindi **decide quali strumenti chiamare e con quali argomenti**. Ogni strumento abilitato è, di fatto, un’API pubblica del tuo sito, chiamabile da chiunque abbia Jase Tunnel:
+The model runs on the visitor’s computer. The visitor can replace it or respond directly to the broker, so **the visitor decides which tools to call and with which arguments**. Every enabled tool is effectively a public website API callable by anyone using Jase Tunnel:
 
-- uno strumento scritto per un agente interno (dove il modello era del server) va rivisto prima di abilitarlo;
-- ogni strumento deve avere `authorize(context, args)`, che controlla la sessione della richiesta e gli argomenti, oppure essere dichiarato `public: true` se è sicuro per qualsiasi visitatore. Senza nessuno dei due il modulo lo rifiuta all’avvio del server;
-- la conferma nel pannello protegge il visitatore da un modello manipolato da contenuti di terzi, **non** il sito dal visitatore, che conferma da sé;
-- `readOnly` decide solo se serve la conferma: non autorizza nulla.
+- Review tools written for internal agents before enabling them.
+- Every tool needs `authorize(context, args)`, checking the request’s session and arguments, or `public: true` when safe for any visitor. Without either policy, the SDK rejects it at startup.
+- Panel confirmation protects visitors from models influenced by malicious content. It does not protect the provider from visitors, who can approve their own calls.
+- `readOnly` controls confirmation; it never grants authorization.
 
-Gli strumenti trovati da `init` o `tools scan` restano disabilitati finché non li abiliti:
+Discovered tools stay disabled until explicitly enabled:
 
 ```sh
 npx jase-tunnel tools list
-npx jase-tunnel tools enable lookup_product            # lo strumento ha authorize
-npx jase-tunnel tools enable opening_hours --public    # sicuro per chiunque
+npx jase-tunnel tools enable lookup_product            # tool has authorize
+npx jase-tunnel tools enable opening_hours --public    # safe for everyone
 ```
 
-`tools enable` rifiuta uno strumento rilevato senza `authorize` se non aggiungi `--public`.
+`tools enable` rejects a discovered tool without `authorize` unless you add `--public`.
 
-## Autodetect degli strumenti
+## Tool discovery
 
-La scansione analizza i sorgenti JavaScript/TypeScript come sintassi; **non importa o esegue il progetto** e non legge variabili d'ambiente, credenziali, database, cartelle dati, dipendenze, test o percorsi simbolici. Non usa una LLM per interpretare i sorgenti e non invia codice a un servizio.
+The scanner parses JavaScript/TypeScript syntax. It **never imports or executes the project**, follows symbolic links, or reads environment variables, credentials, databases, data directories, dependencies or tests. It does not use an LLM or send source code elsewhere.
 
-Riconosce dichiarazioni esportate `tool(...)` di AI SDK, `tool(fn, config)` di LangChain e `defineTool(...)` del modulo; inoltre oggetti o raccolte esportate con descrizione, schema e `execute`/`invoke`. I tool locali non esportati e i factory che richiedono contesto richiedono un adattatore. Per un server MCP usa l’integrazione facoltativa descritta sotto: la scansione non si collega automaticamente ai server. Non trasforma funzioni ordinarie o route HTTP arbitrarie in strumenti IA.
+It recognizes exported AI SDK `tool(...)`, LangChain `tool(fn, config)` and SDK `defineTool(...)` declarations, plus exported objects or collections with descriptions, schemas and `execute`/`invoke` functions. Unexported tools and context-dependent factories need an adapter. For an MCP server, use the optional adapter below; scanning never connects to servers automatically. Ordinary functions and arbitrary HTTP routes are not automatically treated as AI tools.
 
-Gli schemi supportati sono JSON Schema oggetto e Zod 4 convertibile in JSON Schema. Nomi duplicati e schemi incompleti producono un errore esplicito. Le dichiarazioni restano in `jase-tunnel.tools.json`; gli import del server sono in `.jase-tunnel/tools.ts` (o `.js`).
+Schemas must describe JSON objects, or be Zod 4 schemas convertible to JSON Schema. Duplicate names and incomplete schemas produce explicit errors. Declarations live in `jase-tunnel.tools.json`; server imports live in `.jase-tunnel/tools.ts` or `.mjs`.
 
 ```sh
 npx jase-tunnel tools list
@@ -75,22 +75,22 @@ npx jase-tunnel tools add ./src/ai/tools.ts#tools.lookup --name lookup_product
 npx jase-tunnel tools remove lookup_product
 ```
 
-L'aggiunta manuale abilita l'elemento e lo conserva nelle scansioni successive (`--public` se lo strumento non ha `authorize`). La rimozione lo disabilita, anche dopo una nuova scansione; una nuova scansione non riabilita mai nulla. Un normale export funzione può essere aggiunto fornendo schema e descrizione:
+Manual additions are enabled and preserved during future scans; add `--public` when appropriate if no `authorize` exists. Removal disables a tool across subsequent scans. A scan never re-enables it. To register an ordinary exported function, provide its schema and description:
 
 ```sh
-npx jase-tunnel tools add ./src/catalog.ts#lookup --name lookup_product --schema ./schemas/lookup.json --description "Cerca un prodotto nel catalogo" --public
+npx jase-tunnel tools add ./src/catalog.ts#lookup --name lookup_product --schema ./schemas/lookup.json --description "Search the product catalog" --public
 ```
 
-Per dichiarare un tool direttamente:
+To declare a tool directly:
 
 ```ts
 import { defineTool } from 'jase-tunnel/server';
 export const lookupProduct = defineTool({
   name: 'lookup_product',
-  description: 'Cerca un prodotto nel catalogo',
+  description: 'Search the product catalog',
   parameters: { type: 'object', properties: { sku: { type: 'string' } }, required: ['sku'], additionalProperties: false },
   readOnly: true,
-  // Obbligatorio (oppure public: true): chi chiede, e con quali argomenti?
+  // Required unless public: true. These services belong to your application.
   async authorize({ request }, { sku }) {
     const user = await session.fromRequest(request);
     return !!user && catalog.visibleTo(user, sku);
@@ -101,21 +101,21 @@ export const lookupProduct = defineTool({
 });
 ```
 
-Lo schema viene validato prima di `authorize` e dell'esecutore. `request` contiene la richiesta e i cookie del servizio, `signal` la cancellazione, `sessionId` un identificatore opaco; il modulo non aggiunge credenziali proprie. I permessi applicativi non si possono dedurre dai sorgenti: gli esecutori devono conservare le verifiche del progetto. Un hook `authorize(request)` nella configurazione può limitare l'intero pannello; ogni tool ha il proprio `authorize(context, args)` o `public: true`.
+Schemas are validated before authorization or execution. `request` includes the website’s request and cookies, `signal` provides cancellation, and `sessionId` is opaque. The SDK adds no credentials of its own. Existing executors must retain application permission checks; these cannot be inferred from source code. Site-level `authorize(request)` can restrict the whole panel, while each tool keeps its own `authorize(context, args)` or `public: true` policy.
 
-Uno strumento è eseguito senza conferma soltanto se dichiara `readOnly: true`, `riskLevel: 'read'` o `annotations.readOnlyHint: true` (oppure con `--read-only`). Gli altri richiedono una conferma nel pannello, vincolata a browser, chiamate e scadenza. L'inventario rilevato non comporta l'esecuzione di alcun tool. `readOnly` non sostituisce l'autorizzazione dei dati privati.
+For local project-owned tools, `readOnly: true`, `riskLevel: 'read'`, `annotations.readOnlyHint: true` or `--read-only` skips confirmation. Other calls require confirmation bound to the browser, calls and expiry. Discovery executes no tools. `readOnly` never replaces private-data authorization.
 
-## Strumenti da un server MCP (SDK 0.5)
+## Tools from an MCP server (SDK 0.5)
 
-Il sito può usare strumenti MCP esistenti senza riscriverne gli esecutori. L’adattatore gira sul server del sito; il desktop continua a parlare `jase-tunnel-v1` e richiede lo stesso consenso.
+Reuse MCP tools without rewriting their executors. The adapter runs on the website’s server; the desktop continues to speak `jase-tunnel-v1` and requires the same consent.
 
-MCP è facoltativo: installa il client ufficiale solo nei progetti che lo usano.
+MCP is optional. Install the official client only in projects that use it:
 
 ```sh
 npm install @modelcontextprotocol/client@^2.3.1
 ```
 
-Nella configurazione generata da `init`, aggiungi il provider remoto agli strumenti locali:
+Add the remote provider alongside local tools in the configuration generated by `init`:
 
 ```ts
 import { defineSite } from 'jase-tunnel/server';
@@ -123,46 +123,44 @@ import { mcpTools } from 'jase-tunnel/mcp';
 import { tools } from './.jase-tunnel/tools';
 
 const catalog = mcpTools({
-  url: process.env.CATALOG_MCP_URL!, // endpoint HTTPS configurato dal proprietario
+  url: process.env.CATALOG_MCP_URL!, // fixed provider-owned HTTPS endpoint
   tools: {
     search_products: {
-      name: 'catalog.search', // nome remoto; la chiave è il nome visto dal modello
-      public: true,          // solo se il catalogo è accessibile a chiunque
-      readOnly: true         // dichiarazione esplicita del proprietario
+      name: 'catalog.search', // remote name; the key is the local model’s tool name
+      public: true,          // only for a catalog that anyone may access
+      readOnly: true         // explicit provider policy
     }
   }
 });
 
 export default defineSite({
-  name: 'Il mio negozio', origin: process.env.JASE_TUNNEL_ORIGIN,
+  name: 'My shop', origin: process.env.JASE_TUNNEL_ORIGIN,
   tools: async context => [...tools, ...await catalog(context)]
 });
 ```
 
-Solo gli strumenti elencati vengono esposti. Ogni regola richiede `authorize(context, args)` oppure `public: true`; le annotazioni `readOnlyHint` del server remoto non abilitano né autorizzano nulla. Senza `readOnly: true`, la chiamata richiede conferma nel pannello.
+Only listed tools are exposed. Each policy needs `authorize(context, args)` or `public: true`. Remote `readOnlyHint` annotations never enable or authorize anything. Without explicit `readOnly: true`, the panel asks for confirmation.
 
-Per dati privati, `headers: async ({ request, signal }) => ...` deve ottenere le credenziali MCP dalla sessione **verificata** del visitatore; `authorize` controlla anche gli argomenti. Il modulo non inoltra automaticamente cookie o header del browser e non condivide client o sessioni MCP tra visitatori. Non usare un token amministratore con strumenti pubblici che accedono a dati riservati. Il consenso al modello locale non assegna permessi sul servizio.
+For private data, use `headers: async ({ request, signal }) => ...` to obtain upstream credentials from the visitor’s **verified** session, and use `authorize` to check arguments. The adapter never automatically forwards browser cookies or headers and never shares MCP clients or transport sessions between visitors. Do not give public private-data tools an administrative token. Consent to local inference does not grant service permissions.
 
-Supporta **Streamable HTTP**, negoziando MCP `2026-07-28` e il fallback ai server `2025` compatibili, e risultati testuali/JSON strutturati. HTTPS è richiesto salvo HTTP su loopback per servizi locali; URL e selezione degli strumenti appartengono alla configurazione del sito, mai ai parametri del visitatore. Redirect rifiutati, scadenza per operazione di 15 secondi (`timeoutMs`, massimo 30), risposte complessive limitate a 1 MiB e risultati al modello limitati a 30.000 caratteri.
+Supports **Streamable HTTP**, negotiating MCP `2026-07-28` and falling back to compatible `2025` servers, with text and structured JSON results. HTTPS is required except for loopback HTTP services. The endpoint and tool selection come from provider configuration, never visitor input. Redirects are rejected. Each operation has a 15-second deadline (`timeoutMs`, maximum 30 seconds), a total 1 MiB response budget and a 30,000-character result limit.
 
-Una connessione MCP nuova viene chiusa dopo ciascuna operazione: i server che dipendono dallo stato implicito di una connessione tra chiamate non sono supportati. Stato applicativo e riferimenti devono passare negli argomenti, sotto il controllo del server MCP. Non sono inclusi stdio, il vecchio trasporto HTTP+SSE, sampling, elicitation, Tasks, risorse, prompt o risultati multimodali. Le conversazioni e i limiti di hosting di Jase Tunnel restano quelli descritti sotto.
+A fresh connection is closed after each operation. Servers requiring implicit connection state across calls are unsupported; application handles must travel explicitly in arguments and remain authorized by the MCP server. Stdio, legacy HTTP+SSE, sampling, elicitation, Tasks, resources, prompts and multimodal results are not included. Tunnel conversation and hosting limits still apply.
 
-Nel repository, `node packages/sdk/examples/mcp-shop.mjs` (dopo `npm ci --prefix packages/sdk`) avvia un negozio dimostrativo su `http://127.0.0.1:3322` con un vero server MCP locale e il pannello Tunnel. Per collegarlo da localhost serve la build di sviluppo dell’app. Non scrive dati persistenti e termina entrambi i server con Ctrl-C.
+In the repository, run `node packages/sdk/examples/mcp-shop.mjs` after `npm ci --prefix packages/sdk` to open a demo shop at `http://127.0.0.1:3322`, using a real local MCP server and the Tunnel panel. Localhost pairing requires the desktop development build. The demo writes no persistent data; Ctrl-C closes both servers.
 
-## App desktop e collegamento
+## Desktop app and connection
 
-Serve **Jase Tunnel 0.3.0 o successivo** sul computer del visitatore; il pannello propone il download dalle release di GitHub. Il visitatore non deve fare altro: quando il browser lo consente senza mostrare richieste di permesso, la pagina si annuncia all’app, che verifica dominio e manifest e mostra una notifica. «Collega» nella notifica fa proseguire la pagina fino al consenso nell’app, dove il visitatore sceglie il modello. Prima del consenso il sito non riceve l’inventario dei modelli.
+Visitors need **Jase Tunnel 0.3.0 or later**. The panel offers downloads from GitHub releases. Where the browser permits it without prompting, the page announces itself; the app verifies the domain and manifest and displays a notification. **Connect** in the notification resumes pairing in the page. The visitor chooses a model and confirms in the app. Before consent the website receives no model inventory.
 
-Chrome ed Edge chiedono il permesso di accesso locale prima che una pagina contatti l’app. Il pannello non si annuncia da solo se questo farebbe comparire la richiesta: al primo contatto il visitatore usa il pulsante «Collega il mio modello», poi su quel sito le notifiche arrivano da sole.
+Chrome and Edge may require local network access permission before a page contacts the app. The panel does not announce itself automatically when this would trigger a prompt. Use **Connect my model** on the first visit; subsequent visits to the same website can notify automatically.
 
-Il collegamento dura al massimo trenta minuti, resta vincolato a quel modello e può essere revocato dal pannello del sito o dal pulsante **Scollega siti** nell’app. La revoca interrompe anche le inferenze attive.
+Connections last up to thirty minutes, stay bound to the selected model and can be revoked from the website or **Disconnect websites** in the app. Revocation also cancels active inference.
 
-In produzione usare HTTPS e, se il reverse proxy cambia l’autorità della Request, configurare `JASE_TUNNEL_ORIGIN=https://il-tuo-dominio`.
+Production requires HTTPS. If a proxy changes the request’s host, set `JASE_TUNNEL_ORIGIN=https://your-domain.example`. Set `JASE_TUNNEL_TRUST_PROXY=true` or `trustProxy: true` only behind a proxy that overwrites `X-Forwarded-For`: it lets limits distinguish clients, while trusting an unsanitized header lets callers choose their own identity. Without it, proxied clients share one limit. Localhost requires a development desktop build; stable builds reject local website domains. If the site has a CSP, allow `connect-src http://127.0.0.1:11439` and the panel script from your own origin. The SDK does not loosen policies automatically.
 
-Le richieste senza il cookie del modulo (primo collegamento, associazione dell’app) sono limitate per indirizzo del client e, con un margine più ampio, tutte insieme. L’adattatore Node usa l’indirizzo del socket. Dietro un reverse proxy che imposta `X-Forwarded-For` (nginx, un load balancer, Next.js in produzione) imposta `JASE_TUNNEL_TRUST_PROXY=true` o `trustProxy: true` nella configurazione: altrimenti tutti i client condividono lo stesso limite. Non attivarlo senza un proxy che sovrascrive l’header, perché il client potrebbe sceglierlo da sé. Per un servizio in `localhost` serve una build di sviluppo dell’app (`npm run build:dev` nel repository): una release accetta solo siti HTTPS pubblici. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439` e lo script del pannello dal proprio dominio; il modulo non allenta automaticamente le policy del progetto.
+The broker holds state in memory: use **one persistent Node process with request affinity**. **Vercel, Netlify, Cloudflare Workers and other serverless functions are unsupported**, as are multiple workers without affinity. A restart requires pairing again. Panel conversations are not saved to disk. Model-response streaming and automatic integration with arbitrary chatbots are not claimed.
 
-Il broker usa la memoria del processo: servono un’istanza Node persistente e affinità delle richieste. **Non funziona su Vercel, Netlify, Cloudflare Workers o altre funzioni serverless**, né con più worker senza affinità: le richieste in attesa vivono in un solo processo. Un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming delle risposte del modello e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.
+## License
 
-## Licenza
-
-[Apache License 2.0](LICENSE); avvisi in [`NOTICE`](NOTICE). Il nome «Jase Tunnel» e il logo seguono la [politica del marchio](https://github.com/Strnozz/jase-tunnel/blob/main/TRADEMARK_POLICY.md) del progetto.
+[Apache License 2.0](LICENSE); attribution in [NOTICE](NOTICE). The Jase Tunnel name and logo follow the project’s [trademark policy](https://github.com/Strnozz/jase-tunnel/blob/main/TRADEMARK_POLICY.md).

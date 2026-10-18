@@ -39,10 +39,10 @@ func (a *application) setDetailedLogging(enabled bool) {
 	if !enabled {
 		a.clearActivity()
 	}
-	a.record("app", "info", "Log dettagliato aggiornato", map[bool]string{true: "I testi di prompt e risposte sono visibili solo su questo computer.", false: "Testi disattivati. I precedenti eventi sono stati rimossi dalla vista; eventuali file di log già scritti restano sul computer."}[enabled])
+	a.record("app", "info", "Detailed logging updated", map[bool]string{true: "Prompt and response text is visible only on this computer.", false: "Text logging disabled. Previous events were cleared from the view; existing log files remain on this computer."}[enabled])
 }
 
 func (a *application) setModelThinking(enabled bool) {
 	a.think.Store(enabled)
-	a.record("model", "info", "Ragionamento del modello aggiornato", map[bool]string{true: "Attivo per i modelli che lo supportano.", false: "Disattivato per le prossime richieste."}[enabled])
+	a.record("model", "info", "Model reasoning updated", map[bool]string{true: "Enabled for models that support it.", false: "Disabled for future requests."}[enabled])
 }

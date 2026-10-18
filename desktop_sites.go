@@ -28,29 +28,29 @@ func siteStatus(s desktopSite) string {
 	switch s.State {
 	case "open":
 		// The list marks open tunnels already: the line keeps what fits in the column.
-		text := s.Model + " · fino alle " + time.UnixMilli(s.ExpiresAt).Format("15:04")
+		text := s.Model + " · until " + time.UnixMilli(s.ExpiresAt).Format("15:04")
 		if s.Active {
-			text += " · attivo"
+			text += " · active"
 		}
 		return text
 	case "awaiting_approval":
-		return "Chiede il tunnel: conferma nel pannello"
+		return "Tunnel requested: confirm in the panel"
 	case "connecting":
-		return "Collegamento in corso"
+		return "Connecting"
 	case "requested":
-		return "Collegamento richiesto dalla notifica"
+		return "Connection requested from notification"
 	case "compatible":
-		return "Pagina compatibile · nessun tunnel aperto"
+		return "Compatible page · no open tunnel"
 	case "verifying":
-		return "Verifica del sito in corso"
+		return "Verifying website"
 	case "incompatible":
-		return "Sito non compatibile"
+		return "Unsupported website"
 	case "rejected":
-		return "Tunnel rifiutato o chiuso"
+		return "Tunnel declined or closed"
 	case "failed":
-		return "Collegamento non riuscito"
+		return "Connection failed"
 	}
-	return "Nessun tunnel aperto"
+	return "No open tunnel"
 }
 
 // desktopSites lists every site with an open tunnel, a pending request or events in

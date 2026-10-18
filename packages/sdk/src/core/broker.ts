@@ -58,26 +58,26 @@ export class TunnelBroker {
   }
   ticket(browser: string): string {
     for (const [key, value] of this.tickets) if (value.expiresAt <= this.now() || value.browserHash === hash(browser)) this.tickets.delete(key);
-    if (this.tickets.size >= 2000) throw new TunnelError(503, "busy", "Riprova tra poco.");
+    if (this.tickets.size >= 2000) throw new TunnelError(503, "busy", "Try again shortly.");
     const value = secret(); this.tickets.set(hash(value), { browserHash: hash(browser), expiresAt: this.now() + 5 * 60_000 }); return value;
   }
   pair(ticket: string, label: string, models: unknown) {
     const entry = this.tickets.get(hash(ticket));
-    if (!entry || entry.expiresAt <= this.now()) throw new TunnelError(403, "pairing_expired", "Collegamento scaduto: riprova dalla pagina del servizio.");
+    if (!entry || entry.expiresAt <= this.now()) throw new TunnelError(403, "pairing_expired", "Connection expired: try again from the website.");
     const checked = validateModels(models);
-    if (typeof label !== "string" || label.length < 1 || label.length > 80 || /[\x00-\x1f]/.test(label)) throw new TunnelError(400, "invalid_device", "Nome del dispositivo non valido.");
+    if (typeof label !== "string" || label.length < 1 || label.length > 80 || /[\x00-\x1f]/.test(label)) throw new TunnelError(400, "invalid_device", "Invalid device name.");
     for (const c of [...this.connections.values()]) if (c.expiresAt <= this.now() || c.browserHash === entry.browserHash) this.remove(c.id);
-    if (this.connections.size >= MAX_CONNECTIONS) throw new TunnelError(503, "busy", "Riprova tra poco.");
+    if (this.connections.size >= MAX_CONNECTIONS) throw new TunnelError(503, "busy", "Try again shortly.");
     this.tickets.delete(hash(ticket));
     const token = secret(), id = randomBytes(16).toString("hex");
     this.connections.set(id, { id, browserHash: entry.browserHash, tokenHash: hash(token), label, models: checked, lastSeen: this.now(), expiresAt: this.now() + AGE });
     this.save(); return { protocol: TUNNEL_PROTOCOL, connectionId: id, token };
   }
   authenticate(token: string): Connection {
-    if (!/^[a-f0-9]{64}$/.test(token)) throw new TunnelError(401, "unauthorized", "Dispositivo non collegato.");
+    if (!/^[a-f0-9]{64}$/.test(token)) throw new TunnelError(401, "unauthorized", "Device not connected.");
     const fingerprint = hash(token);
     const c = [...this.connections.values()].find(value => value.tokenHash === fingerprint && value.expiresAt > this.now());
-    if (!c) throw new TunnelError(401, "unauthorized", "Dispositivo non collegato.");
+    if (!c) throw new TunnelError(401, "unauthorized", "Device not connected.");
     c.lastSeen = this.now();
     // Sliding expiry: a computer in use stays connected. Written at most once a day.
     if (c.expiresAt - this.now() < AGE - 86400_000) { c.expiresAt = this.now() + AGE; this.save(); }
@@ -99,7 +99,7 @@ export class TunnelBroker {
   private locate(choice: PersonalModelChoice) {
     const c = this.connections.get(choice.split(":")[1]?.split(".")[0]);
     const model = c?.models.find(m => this.choice(c, m) === choice);
-    if (!c || !model || c.expiresAt <= this.now() || c.lastSeen <= this.now() - ONLINE) throw new TunnelError(503, "device_offline", "Il tuo computer non è collegato. Apri Jase Tunnel e riprova.");
+    if (!c || !model || c.expiresAt <= this.now() || c.lastSeen <= this.now() - ONLINE) throw new TunnelError(503, "device_offline", "Your computer is not connected. Open Jase Tunnel and try again.");
     return { c, model };
   }
   modelContext(choice: PersonalModelChoice) { return this.locate(choice).model.contextTokens ?? 32768; }
@@ -107,17 +107,17 @@ export class TunnelBroker {
   // long a request may wait behind the ones before it.
   async infer(choice: PersonalModelChoice, input: Omit<InferenceTask, "id" | "model" | "expiresAt">, signal?: AbortSignal, timeoutMs = 600_000, queueMs = 900_000): Promise<ModelTurn> {
     const { c, model } = this.locate(choice);
-    if (input.tools.length && !model.tools) throw new TunnelError(400, "unsupported_tools", "Questo modello non supporta gli strumenti.");
+    if (input.tools.length && !model.tools) throw new TunnelError(400, "unsupported_tools", "This model does not support tools.");
     if (signal?.aborted) throw signal.reason;
-    if (JSON.stringify(input).length > 1_000_000) throw new TunnelError(413, "context_too_large", "Il contesto è troppo grande per il modello personale.");
+    if (JSON.stringify(input).length > 1_000_000) throw new TunnelError(413, "context_too_large", "The context is too large for your local model.");
     // Queued, not refused: the computer answers in order. Refused only beyond the queue.
     const queued = [...this.pending.values()].filter(p => p.connection === c.id).length;
     if (this.pending.size >= 500 || queued >= QUEUE_PER_DEVICE()) {
-      throw new TunnelError(429, "model_busy", "Il tuo modello ha già troppe richieste in coda. Attendi e riprova.");
+      throw new TunnelError(429, "model_busy", "Your model has too many queued requests. Wait and try again.");
     }
     const used = this.usage.get(c.browserHash), now = this.now();
     if (used && now - used.start < HOUR && used.count >= TURNS_PER_HOUR()) {
-      throw new TunnelError(429, "hourly_limit", "Hai raggiunto il limite orario di richieste con il tuo modello. Riprova più tardi.");
+      throw new TunnelError(429, "hourly_limit", "You reached the hourly request limit for your model. Try again later.");
     }
     if (!used || now - used.start >= HOUR) {
       if (this.usage.size > 20_000) this.usage.clear();
@@ -129,7 +129,7 @@ export class TunnelBroker {
     const id = secret(), task = { ...input, id, model, contextTokens, expiresAt: this.now() + timeoutMs };
     return new Promise<ModelTurn>((resolve, reject) => {
       const abort = () => finish(undefined, signal?.reason ?? new Error("Model request cancelled"));
-      const late = () => finish(undefined, new TunnelError(504, "model_timeout", "Il modello personale non ha risposto in tempo."));
+      const late = () => finish(undefined, new TunnelError(504, "model_timeout", "Your local model did not respond in time."));
       let timer = setTimeout(late, queueMs); timer.unref();
       const deliver = (): InferenceTask => {
         clearTimeout(timer); timer = setTimeout(late, timeoutMs); timer.unref();
@@ -139,7 +139,7 @@ export class TunnelBroker {
       const watch = setInterval(() => {
         const p = this.pending.get(id);
         const silent = c.lastSeen <= this.now() - ONLINE || p?.delivered && p.heartbeat <= this.now() - 30_000;
-        if (p && silent) p.finish(undefined, new TunnelError(503, "device_offline", "Il collegamento al tuo computer si è interrotto. Apri Jase Tunnel e riprova."));
+        if (p && silent) p.finish(undefined, new TunnelError(503, "device_offline", "The connection to your computer was interrupted. Open Jase Tunnel and try again."));
       }, 10_000);
       watch.unref();
       const finish = (turn?: ModelTurn, error?: Error) => {
@@ -155,7 +155,7 @@ export class TunnelBroker {
   }
   async poll(token: string, signal?: AbortSignal, waitMs = 20_000): Promise<InferenceTask | null> {
     const c = this.authenticate(token);
-    if (this.wake.has(c.id)) throw new TunnelError(409, "already_polling", "Collegamento già attivo.");
+    if (this.wake.has(c.id)) throw new TunnelError(409, "already_polling", "Connection already active.");
     const next = () => [...this.pending.values()].find(p => p.connection === c.id && !p.delivered);
     if (!next() && !signal?.aborted) await new Promise<void>(resolve => {
       const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); this.wake.delete(c.id); resolve(); };
@@ -173,15 +173,15 @@ export class TunnelBroker {
     const c = this.authenticate(token), pending = this.pending.get(id);
     if (!pending || pending.connection !== c.id) return false;
     if (pending.delivered && pending.heartbeat <= this.now() - 30_000) {
-      pending.finish(undefined, new TunnelError(503, "device_offline", "Il collegamento al tuo computer si è interrotto. Riprova.")); return false;
+      pending.finish(undefined, new TunnelError(503, "device_offline", "The connection to your computer was interrupted. Try again.")); return false;
     }
     pending.heartbeat = this.now(); return true;
   }
   result(token: string, id: string, value: unknown) {
     const c = this.authenticate(token), p = this.pending.get(id);
-    if (!p || p.connection !== c.id || !p.delivered) throw new TunnelError(404, "request_expired", "Richiesta scaduta.");
+    if (!p || p.connection !== c.id || !p.delivered) throw new TunnelError(404, "request_expired", "Request expired.");
     const v = value as Record<string, unknown>;
-    if (v?.error) { p.finish(undefined, new TunnelError(503, "local_model_error", "Il modello sul tuo computer non ha completato la richiesta.")); return; }
+    if (v?.error) { p.finish(undefined, new TunnelError(503, "local_model_error", "The model on your computer did not complete the request.")); return; }
     const turn = validateTurn(value); p.finish(turn); this.debug("answered");
   }
   update(token: string, models: unknown) {
@@ -201,19 +201,19 @@ export class TunnelBroker {
     this.connections.delete(id);
     this.wake.get(id)?.();
     for (const p of [...this.pending.values()]) {
-      if (p.connection === id) p.finish(undefined, new TunnelError(503, "device_disconnected", "Computer scollegato."));
+      if (p.connection === id) p.finish(undefined, new TunnelError(503, "device_disconnected", "Computer disconnected."));
     }
   }
 }
 
 export function validateModels(input: unknown): TunnelModel[] {
-  if (!Array.isArray(input) || input.length > 100) throw new TunnelError(400, "invalid_models", "Elenco dei modelli non valido.");
+  if (!Array.isArray(input) || input.length > 100) throw new TunnelError(400, "invalid_models", "Invalid model list.");
   const keys = new Set<string>();
   return input.map(value => {
     const m = value as TunnelModel;
     if (!m || typeof m.key !== "string" || m.key.length > 300 || !/^(ollama|lmstudio):[^\x00-\x1f]+$/.test(m.key)
       || typeof m.name !== "string" || !m.name.length || m.name.length > 200 || /[\x00-\x1f]/.test(m.name)
-      || !["ollama", "lmstudio"].includes(m.engine) || !m.key.startsWith(`${m.engine}:`) || typeof m.tools !== "boolean" || keys.has(m.key)) throw new TunnelError(400, "invalid_models", "Modello non valido.");
+      || !["ollama", "lmstudio"].includes(m.engine) || !m.key.startsWith(`${m.engine}:`) || typeof m.tools !== "boolean" || keys.has(m.key)) throw new TunnelError(400, "invalid_models", "Invalid model.");
     keys.add(m.key);
     return { key: m.key, name: m.name, engine: m.engine, tools: m.tools,
       ...(Number.isSafeInteger(m.sizeBytes) && m.sizeBytes! >= 0 ? { sizeBytes: m.sizeBytes } : {}),
@@ -224,6 +224,6 @@ export function validateTurn(input: unknown): ModelTurn {
   const value = input as ModelTurn;
   if (!value || typeof value.content !== "string" || value.content.length > 64_000 || !Array.isArray(value.toolCalls) || value.toolCalls.length > 6
     || value.toolCalls.some(c => !c || !/^[a-z][a-z0-9_]{1,40}$/.test(c.name) || !c.arguments || typeof c.arguments !== "object" || Array.isArray(c.arguments))
-    || JSON.stringify(value).length > 128_000 || (!value.content.trim() && !value.toolCalls.length)) throw new TunnelError(400, "invalid_result", "Risposta del modello non valida.");
+    || JSON.stringify(value).length > 128_000 || (!value.content.trim() && !value.toolCalls.length)) throw new TunnelError(400, "invalid_result", "Invalid model response.");
   return { content: value.content, toolCalls: value.toolCalls.map(c => ({ name: c.name, arguments: c.arguments })) };
 }

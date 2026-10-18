@@ -1,95 +1,95 @@
 # Jase Tunnel Web Protocol
 
-Bozza di progetto 0.1 · 17 ottobre 2026 · identificatore proposto: `jase-tunnel-v1`.
+Design draft 0.1 · October 17, 2026 · proposed identifier: `jase-tunnel-v1`.
 
-Questa è la specifica proposta. La versione 0.3 implementa scoperta, annuncio automatico delle pagine, notifiche di sistema con limiti di frequenza, verifica di rete, ricevute, consenso nativo, collegamenti con modello fissato, broker/SDK e installatore per Next.js, Express e `node:http`. Il protocollo a sito singolo delle versioni precedenti è stato rimosso. Sono ancora proposte il silenziamento per sito, l’estensione ad altri framework e il collaudo completo della matrice browser. Non si dichiara ancora uno standard pubblico completo. I termini DEVE, NON DEVE e DOVREBBE indicano requisiti della proposta.
+This is a proposed specification. Version 0.3 implements discovery, automatic page announcements, rate-limited system notifications, network verification, receipts, native consent, model-bound connections, the broker/SDK and installers for Next.js, Express and `node:http`. The previous single-site protocol was removed. Per-site muting, additional frameworks and a complete browser compatibility matrix remain proposals. This is not yet a complete public standard. MUST, MUST NOT and SHOULD indicate requirements of this proposal.
 
-## 1. Esperienza dell’utente
+## 1. User experience
 
-**Scarichi Jase Tunnel, lo apri, visiti una piattaforma compatibile e l’app ti avvisa che puoi usare la tua LLM con gli strumenti di quella piattaforma.**
+**Download Jase Tunnel, open it and visit a compatible website. The app notifies you that your local LLM can use that website’s tools.**
 
-1. L’app rimane in esecuzione e rileva i modelli locali disponibili.
-2. La pagina compatibile si annuncia al tunnel, quando il browser consente il contatto locale.
-3. Il tunnel verifica la dichiarazione del sito e mostra: «Questo sito supporta Jase Tunnel: piattaforma.example».
-4. L’utente sceglie «Collega» nella notifica oppure sulla pagina. L’app mostra il dominio verificato, i dati scambiati e il selettore del modello; l’utente conferma nell’app.
-5. Gli strumenti IA della piattaforma usano il modello scelto. Il pannello mostra i collegamenti attivi e permette di interromperli.
+1. The app stays running and detects available local models.
+2. A compatible page announces itself when the browser permits local contact.
+3. The tunnel verifies the website’s declaration and displays “This website supports Jase Tunnel: platform.example.”
+4. The user chooses **Connect** in the notification or page. The app shows the verified domain, data exchange and model selector; the user confirms in the app.
+5. The website’s AI tools use the selected model. The panel shows active connections and lets the user stop them.
 
-Non occorre un account Jase Tunnel o un’estensione obbligatoria. La piattaforma conserva i propri requisiti di accesso: il tunnel non rende anonimo un servizio che richiede un account.
+No Jase Tunnel account or mandatory browser extension is needed. Websites retain their own sign-in requirements; Tunnel does not make an account-based service anonymous.
 
-La notifica annuncia la compatibilità; l’accesso al modello richiede il consenso nell’app. Una piattaforma compatibile può essere rilevata anche quando non ci sono modelli pronti: l’app spiega come avviare Ollama o LM Studio.
+Notifications announce compatibility. Model access requires consent in the app. A website can be detected even when no models are ready; the app explains how to start Ollama or LM Studio.
 
-### Il primo contatto nel browser
+### First browser contact
 
-Una normale app desktop non riceve automaticamente gli URL visitati. Il sito DEVE collaborare eseguendo il client web del protocollo. Il solo manifest pubblicato sul server non avvisa l’app.
+A normal desktop app does not automatically receive visited URLs. The website MUST cooperate by running the protocol’s web client. A server manifest alone cannot notify the app.
 
-Il browser può richiedere un permesso per contattare il servizio locale. Quando è necessario, la pagina mostra «Rileva Jase Tunnel» e una spiegazione; il tentativo parte da un’azione dell’utente. Quando il permesso è già disponibile, il sito può annunciarsi all’apertura della pagina. Le prove devono verificare questo comportamento per ciascun browser supportato.
+The browser may require permission to contact a local service. When needed, the page displays a detection/connect button and explanation, and contact starts with a user action. With permission already available, the page can announce itself when opened. Tests must verify this behavior for each supported browser.
 
-Pertanto l’esperienza automatica è garantibile **dopo il consenso richiesto dal browser e finché pagina e app sono attive**. Senza contatto, l’app mostra «In attesa di siti compatibili»; non può stabilire che il sito visitato sia incompatibile. Una richiesta ricevuta identifica l’origine che ha contattato l’app, non prova che sia la scheda in primo piano.
+Automatic behavior is therefore possible **after the browser’s required consent, while both page and app remain active**. Without contact, the app can display “Waiting for compatible websites”; it cannot infer that the visited website is incompatible. An incoming request identifies its browser origin, not necessarily the foreground tab.
 
-## 2. Base presente nel repository
+## 2. Repository foundations
 
-| Componente | Codice presente | Evoluzione necessaria |
+| Component | Existing code | Required development |
 | --- | --- | --- |
-| Servizio locale | `main.go`, ascolto su `127.0.0.1:11439` | API di scoperta separate dalle operazioni autorizzate |
-| Origini | `webOrigin`: siti HTTPS pubblici, loopback solo nelle build di sviluppo | Silenziamento per sito |
-| Associazione | Ticket del browser scambiato dal tunnel con il server | Consenso nell’app, modello scelto, scadenza e revoca |
-| Trasporto | `protocol.go`, richieste in uscita al broker del sito | Profilo interoperabile e credenziali separate per sito e sessione |
-| Inferenza | `models.go`, Ollama e LM Studio locali | Applicazione dei limiti e del modello autorizzato a ogni turno |
-| Strumenti | Schemi `tool`, richieste `toolCall` | La piattaforma continua a verificare ed eseguire le proprie funzioni |
-| Interfaccia | AppKit su macOS, Win32 su Windows, GTK 3 su Linux | Elenco siti, notifiche e controlli di autorizzazione su tutti i sistemi supportati |
-| Riservatezza | Token e percorsi completi conservati localmente | Nessun inventario o identificatore di altri siti nelle nuove API |
+| Local service | `main.go`, listening on `127.0.0.1:11439` | Discovery APIs separated from authorized operations |
+| Origins | `webOrigin`: public HTTPS, loopback only in development builds | Per-site muting |
+| Pairing | Browser ticket exchanged by the app with the server | Native consent, selected model, expiry and revocation |
+| Transport | `protocol.go`, outgoing requests to the website broker | Interoperable profile and credentials isolated by website/session |
+| Inference | `models.go`, local Ollama and LM Studio | Enforce the authorized model and limits on every turn |
+| Tools | Tool schemas and tool-call requests | Providers retain validation and execution responsibility |
+| Interface | AppKit, Win32 and GTK 3 | Website list, notifications and consent controls on supported systems |
+| Privacy | Tokens and full paths stored locally | No other-site inventories or identifiers in discovery APIs |
 
-Il broker e il pannello web dei siti sono nel pacchetto `jase-tunnel` (`packages/sdk`); ogni sito li installa nel proprio server.
+The broker and website panel are in `jase-tunnel` (`packages/sdk`); providers install them on their own server.
 
-## 3. Componenti e responsabilità
+## 3. Components and responsibilities
 
-Ogni piattaforma integra tre elementi: un manifest pubblico, un piccolo client nella pagina e un broker sul proprio server. Il tunnel fornisce scoperta, consenso, collegamento e adattatori dei modelli.
+Each website integrates a public manifest, a small page client and a server-side broker. The tunnel provides discovery, consent, connections and model adapters.
 
 ```mermaid
 sequenceDiagram
-    participant U as Utente
-    participant P as Pagina compatibile
+    participant U as User
+    participant P as Compatible page
     participant T as Jase Tunnel
-    participant S as Server della piattaforma
-    participant M as LLM locale
-    U->>T: Apre l’app
-    U->>P: Visita la piattaforma
-    P->>T: Annuncio, se il browser lo permette
-    T->>S: Verifica manifest pubblico
-    T-->>U: Notifica di compatibilità
-    U->>P: Collega
-    P->>S: Crea ticket per questa sessione
-    P->>T: Consegna ticket
-    T-->>U: Mostra dominio e scelta del modello
-    U->>T: Autorizza
-    T->>S: Consuma ticket e associa il modello scelto
-    T->>S: Attende un turno con richiesta in uscita
-    S-->>T: Messaggi e definizioni degli strumenti
-    T->>M: Esegue il turno
-    M-->>T: Testo e richieste di strumenti
-    T->>S: Consegna il risultato
-    S->>S: Verifica ed esegue gli strumenti
-    S-->>P: Aggiorna l’esperienza IA
+    participant S as Website server
+    participant M as Local LLM
+    U->>T: Open app
+    U->>P: Visit website
+    P->>T: Announce, if browser permits
+    T->>S: Verify public manifest
+    T-->>U: Compatibility notification
+    U->>P: Connect
+    P->>S: Create ticket for this session
+    P->>T: Deliver ticket
+    T-->>U: Show domain and model selector
+    U->>T: Approve
+    T->>S: Consume ticket and pair selected model
+    T->>S: Wait for work through outgoing request
+    S-->>T: Messages and tool definitions
+    T->>M: Run turn
+    M-->>T: Text and tool requests
+    T->>S: Deliver result
+    S->>S: Validate and execute tools
+    S-->>P: Update AI experience
 ```
 
-Il server mantiene l’orchestrazione già prevista dal codice: riceve le richieste dell’utente, costruisce i turni, esegue gli strumenti e aggiorna la pagina. Tutti i collegamenti remoti del tunnel partono dal computer verso il server della piattaforma. Non serve aprire porte sul router o usare un relay di terzi.
+The server keeps orchestration: receive user requests, construct turns, execute tools and update the page. Every remote tunnel connection starts on the user’s computer and goes to the website server. No inbound router port or third-party relay is needed.
 
-Il sito DEVE esporre ogni strumento utilizzabile come funzione con nome, descrizione, schema JSON degli argomenti ed esecutore autorizzato sul server. Pubblicare il manifest da solo non rende disponibili alla LLM tutte le funzioni dell’interfaccia.
+Every available tool MUST have a name, description, JSON argument schema and authorized server-side executor. Publishing the manifest alone does not expose all interface functions to the LLM.
 
-## 4. Dichiarazione di compatibilità
+## 4. Compatibility declaration
 
-Percorso fisso per ogni origine:
+Fixed path for each origin:
 
 ```text
-GET https://piattaforma.example/.well-known/jase-tunnel.json
+GET https://platform.example/.well-known/jase-tunnel.json
 Content-Type: application/json
 ```
 
-Esempio:
+Example:
 
 ```json
 {
-  "name": "Piattaforma Esempio",
+  "name": "Example Platform",
   "protocols": ["jase-tunnel-v1"],
   "broker": "/api/jase-tunnel/v1/",
   "requirements": {
@@ -99,238 +99,236 @@ Esempio:
 }
 ```
 
-Il manifest DEVE rispettare queste regole:
+Manifest rules:
 
-- `name`: testo di presentazione da 1 a 80 caratteri. L’app visualizza sempre anche il dominio effettivo e tratta il nome come testo non attendibile.
-- `protocols`: elenco delle versioni implementate. Questa revisione richiede `jase-tunnel-v1`.
-- `broker`: percorso assoluto sulla medesima origine, con `/` finale. Sono vietati URL assoluti, prefissi `//`, query, frammenti, backslash, segmenti `.`/`..` e loro forme codificate. Il tunnel verifica nuovamente l’origine dell’URL risultante.
-- `requirements.capabilities`: sottoinsieme di `chat`, `tool-calls`, `json-schema`; `chat` è obbligatorio. Una capacità richiesta sconosciuta rende il profilo incompatibile.
-- `requirements.contextTokens`: intero tra 2048 e 262144. L’app offre solo modelli con capacità e contesto sufficienti.
-- Dimensione massima: 16 KiB. I campi obbligatori mancanti o di tipo errato invalidano il manifest. Campi aggiuntivi vengono ignorati e non concedono autorizzazioni.
+- `name`: 1–80 display characters. The app also shows the actual domain and treats the name as untrusted text.
+- `protocols`: implemented protocol versions; this revision requires `jase-tunnel-v1`.
+- `broker`: an absolute same-origin path ending in `/`. Absolute URLs, `//` prefixes, queries, fragments, backslashes, `.`/`..` segments and encoded equivalents are forbidden. The app verifies the resulting URL’s origin again.
+- `requirements.capabilities`: a subset of `chat`, `tool-calls`, `json-schema`; `chat` is required. Unknown required capabilities make the profile incompatible.
+- `requirements.contextTokens`: an integer from 2048 to 262144. Only models with sufficient capabilities and context are offered.
+- Maximum size: 16 KiB. Missing or incorrectly typed required fields invalidate the manifest. Extra fields are ignored and never grant permissions.
 
-La pagina può dichiarare anche:
+The page may also declare:
 
 ```html
 <link rel="jase-tunnel" href="/.well-known/jase-tunnel.json">
 ```
 
-Il riferimento HTML serve agli integratori; l’app verifica sempre il percorso fisso sull’origine ricevuta dal browser. Il corpo dell’annuncio non può indicare un altro dominio o un URL da scaricare.
+The HTML link helps integrators. The app always verifies the fixed path on the browser-provided origin. Announcement bodies cannot specify another domain or download URL.
 
-## 5. Scoperta locale
+## 5. Local discovery
 
-Base locale proposta: `http://127.0.0.1:11439/tunnel/v1/`. La porta appartiene alla convenzione del protocollo e non è una porta ufficialmente assegnata. Il profilo base non effettua scansioni di porte o reti. Porte alternative rimangono configurazione esplicita di sviluppo.
+Proposed local base: `http://127.0.0.1:11439/tunnel/v1/`. This port is a protocol convention, not an officially assigned port. The base profile scans neither ports nor networks. Alternative ports are explicit development configuration only.
 
-### Annuncio
+### Announcement
 
-La pagina invia:
+The page sends:
 
 ```http
 POST /tunnel/v1/discover
-Origin: https://piattaforma.example
+Origin: https://platform.example
 Content-Type: application/json
 
 {"protocol":"jase-tunnel-v1","announce":true}
 ```
 
-`announce` è facoltativo. Vale `true` quando la pagina si annuncia da sola durante la navigazione: se il sito risulta compatibile, il tunnel può notificarlo all’utente. Senza `announce` la richiesta segue un clic dell’utente sul pulsante della pagina, che prosegue subito verso il consenso; il tunnel non mostra una notifica superflua.
+`announce` is optional. `true` means the page announces automatically during browsing; if compatible, the app may notify the user. Without it, a page-button click starts pairing directly, avoiding an unnecessary notification.
 
-Il tunnel prende il sito esclusivamente dall’header `Origin` verificato. Risponde `202` con:
+The app derives the website exclusively from the verified `Origin` header. It returns `202`:
 
 ```json
 {
   "protocol": "jase-tunnel-v1",
-  "discoveryId": "<identificatore casuale>",
-  "receipt": "<segreto temporaneo>",
+  "discoveryId": "<random identifier>",
+  "receipt": "<temporary secret>",
   "expiresAt": 1792245900000,
   "state": "verifying"
 }
 ```
 
-`discoveryId` usa 16 byte casuali codificati in esadecimale; `receipt` usa 32 byte casuali codificati in esadecimale. La ricevuta è valida per cinque minuti, resta in memoria nella pagina e nel tunnel ed è vincolata all’origine. Non rappresenta una credenziale di inferenza. L’esempio temporale usa millisecondi Unix.
+`discoveryId` contains 16 random bytes encoded as hexadecimal; `receipt` contains 32. The receipt lasts five minutes, stays in page/app memory and is bound to the origin. It is not an inference credential. Timestamps use Unix milliseconds.
 
-Il tunnel scarica il manifest pubblico senza cookie o credenziali. Se il manifest è valido, passa allo stato `compatible` e può notificare l’utente. La verifica prova che il dominio dichiara il protocollo; non certifica reputazione o affidabilità della piattaforma.
+The app downloads the public manifest without cookies or credentials. A valid manifest changes the state to `compatible` and may produce a notification. This verifies a domain’s protocol declaration, not its reputation or trustworthiness.
 
-### Stato della propria richiesta
+### Request state
 
 ```http
 GET /tunnel/v1/discovery
-Origin: https://piattaforma.example
+Origin: https://platform.example
 Authorization: Bearer <receipt>
 ```
 
-La risposta `200` contiene `protocol`, `discoveryId`, `expiresAt` e `state`. Dopo il collegamento può contenere esclusivamente il `connectionId` di questa associazione. Non restituisce nomi dei modelli, file, registro, credenziali del dispositivo o altre connessioni.
+A `200` response includes `protocol`, `discoveryId`, `expiresAt` and `state`. Once paired, it may include only this association’s `connectionId`. It never exposes model names, files, logs, device credentials or other connections.
 
-Stati: `verifying`, `compatible`, `requested`, `awaiting_approval`, `connecting`, `connected`, `incompatible`, `rejected`, `failed`, `expired`. `compatible` indica il superamento della verifica statica; il broker sarà verificato durante l’associazione. `requested` indica che l’utente ha scelto «Collega» nella notifica: la pagina in attesa prosegue con l’associazione come dopo un clic sul proprio pulsante. Gli stati terminali sono `connected`, `incompatible`, `rejected`, `failed` ed `expired`. Una ricevuta scaduta o sconosciuta produce `410 discovery_expired`; una ricevuta di un’altra origine produce `403 origin_mismatch` senza esporre dati.
+States: `verifying`, `compatible`, `requested`, `awaiting_approval`, `connecting`, `connected`, `incompatible`, `rejected`, `failed`, `expired`. `compatible` means static checks passed; the broker is checked during pairing. `requested` means the user chose **Connect** in a notification; the waiting page proceeds as if its own button had been clicked. Terminal states are `connected`, `incompatible`, `rejected`, `failed` and `expired`. Unknown or expired receipts produce `410 discovery_expired`; receipts from another origin produce `403 origin_mismatch` without revealing data.
 
-Il client interroga lo stato al massimo una volta ogni due secondi, interrompe le interrogazioni a uno stato terminale o alla scadenza e le sospende quando la pagina è nascosta. Non inserisce segreti in URL, log o archiviazione persistente del browser. Per non ripetere l’annuncio a ogni pagina dello stesso sito, conserva la ricevuta nel `sessionStorage` della scheda fino alla sua scadenza.
+The client polls no more than once every two seconds, stops at a terminal state or expiry, and pauses while the page is hidden. Secrets never enter URLs, logs or persistent browser storage. To avoid announcing again on every same-site page, the receipt is retained in tab-scoped `sessionStorage` only until expiry.
 
-### Notifiche
+### Notifications
 
-L’app DEVE conservare una voce nel pannello anche quando le notifiche di sistema sono disabilitate. La notifica è mostrata solo per le richieste con `announce`. Il clic su «Collega» porta la ricevuta allo stato `requested` e non concede permessi: la pagina ancora aperta chiede il ticket al proprio server e l’app mostra il consenso. Se la pagina non è più aperta, il pannello invita a tornarci.
+The app MUST retain a panel entry even when system notifications are disabled. Only requests with `announce` produce a notification. **Connect** moves the receipt to `requested` without granting access; the still-open page obtains a server ticket, then the app shows consent. If the page is closed, the panel asks the user to return to it.
 
-La prima revisione prevede al massimo una notifica per origine ogni 24 ore e tre notifiche di scoperta ogni dieci minuti in totale, e nessuna notifica per un sito già collegato. Le scoperte successive aggiornano il pannello senza ulteriori notifiche. L’utente disattiva le notifiche dalle impostazioni del sistema; il silenziamento per sito resta da implementare. Il tunnel non carica icone o altre risorse remote per comporre l’avviso.
+The first revision allows at most one notification per origin every 24 hours and three discovery notifications every ten minutes overall, with none for an already connected website. Later discoveries update the panel without another notification. System settings can disable notifications; per-site muting is not yet implemented. Notifications load no remote icons or other resources.
 
-Un annuncio non riattiva un collegamento interrotto o revocato. Le notifiche sono una funzione locale: il sito non riceve informazioni sul fatto che l’utente le abbia lette.
+An announcement never reactivates a disconnected or revoked connection. Notifications are local; websites cannot learn whether the user read them.
 
-## 6. Consenso e associazione
+## 6. Consent and pairing
 
-Il broker espone `POST <broker>tickets`, chiamato dalla pagina sulla propria origine dopo il clic «Collega». Usa la sessione del sito, la sua protezione CSRF e `Cache-Control: no-store`. Il corpo è `{"protocol":"jase-tunnel-v1"}`. La risposta `200` contiene `protocol`, `ticket` ed `expiresAt`.
+The page calls same-origin `POST <broker>tickets` after **Connect**, using its website session, CSRF protection and `Cache-Control: no-store`. The body is `{"protocol":"jase-tunnel-v1"}`. A `200` response contains `protocol`, `ticket` and `expiresAt`.
 
-Il ticket usa 32 byte casuali in esadecimale, dura al massimo 120 secondi, è monouso ed è legato a origine e sessione del browser. Il sito conserva la sessione nei propri meccanismi di autenticazione e non la invia al tunnel.
+The one-use ticket contains 32 random hexadecimal bytes, lasts at most 120 seconds and is bound to the origin and browser session. The website retains its authentication session and never sends it to the app.
 
-La pagina consegna il ticket con:
+The page delivers the ticket:
 
 ```http
 POST /tunnel/v1/pair
-Origin: https://piattaforma.example
+Origin: https://platform.example
 Authorization: Bearer <receipt>
 Content-Type: application/json
 
-{"protocol":"jase-tunnel-v1","ticket":"<ticket monouso>"}
+{"protocol":"jase-tunnel-v1","ticket":"<single-use ticket>"}
 ```
 
-Il tunnel accetta solo ricevute in stato `compatible` e risponde `202` con `discoveryId` e `state: "awaiting_approval"`. Una seconda richiesta sulla stessa ricevuta restituisce `409 pairing_in_progress`. Il ticket rimane in memoria fino al completamento o alla scadenza.
+The app accepts only receipts in `compatible` state and returns `202` with `discoveryId` and `state: "awaiting_approval"`. A second request on the receipt produces `409 pairing_in_progress`. The ticket stays in memory until completion or expiry.
 
-Prima di contattare l’endpoint remoto di associazione, l’app DEVE mostrare:
+Before calling the remote pairing endpoint, the app MUST display:
 
-- Origine HTTPS verificata e nome dichiarato della piattaforma.
-- Modello locale selezionabile tra quelli sufficienti per il profilo richiesto.
-- Informativa: «Il sito invierà al modello i messaggi e i dati necessari. Testo generato e richieste di strumenti torneranno al server del sito».
-- Durata del collegamento e pulsanti «Consenti» e «Rifiuta».
+- Verified HTTPS origin and website-provided name.
+- A model selector limited to models meeting the required profile.
+- Notice: “The website will send messages and necessary data to your model. Generated text and tool requests will return to the website’s server.”
+- Connection duration and **Allow**/**Decline** buttons.
 
-Il consenso produce una concessione legata a origine, broker, sessione associata, versione del protocollo, modello scelto e scadenza. Il server può chiedere inferenza soltanto con quel modello. Il consenso non autorizza amministrazione dell’app, accesso ai file, altri siti o altre sessioni.
+Consent creates a grant bound to origin, broker, associated session, protocol version, selected model and expiry. The server may request inference only with that model. Consent does not authorize app administration, files, other websites or other sessions.
 
-In questa prima revisione il collegamento dura al massimo otto ore. Il consenso e la scadenza possono essere conservati privatamente per riprendere un collegamento non scaduto dopo il riavvio dell’app. La scadenza effettiva è il minimo tra quella locale e quella del server. Nuova sessione, modello, broker o versione maggiore richiedono una nuova associazione e consenso. Un modello non più disponibile mette in pausa il collegamento senza sostituzioni automatiche.
+The implemented desktop caps connections at thirty minutes. Consent and expiry may be stored privately to resume an unexpired connection after restart. Effective expiry is the earlier of local and server expiry. A new session, model, broker or major protocol version requires fresh pairing and consent. An unavailable model pauses the connection without automatic substitution.
 
-Dopo la conferma, il tunnel esegue `POST <broker>pair` con protocollo, ticket, etichetta locale del dispositivo e **solo il modello autorizzato**, incluso il suo limite di contesto. Il broker consuma il ticket atomicamente e restituisce `protocol`, `token`, `connectionId`, `expiresAt`. Token: 32 byte casuali esadecimali; identificatore pubblico: 16 byte casuali esadecimali. Il server limita la credenziale alla sessione e alla scadenza dichiarate.
+After approval, the app calls `POST <broker>pair` with protocol, ticket, a local device label and **only the approved model**, including its context capacity. The broker consumes the ticket atomically and returns `protocol`, `token`, `connectionId`, `expiresAt`. The token contains 32 random hexadecimal bytes; the public identifier contains 16. Credentials are limited to the declared session and expiry.
 
-Il tunnel salva concessione e credenziale nella cartella privata prima di avviare le richieste di lavoro. Il salvataggio fallito lascia lo stato `failed` e impedisce l’inferenza. Il browser vede solo il successo e il proprio identificatore pubblico tramite lo stato della ricevuta.
+The app saves the grant and credential privately before requesting work. Failed storage leaves `failed` state and prevents inference. The browser sees only success and its own public identifier through receipt state.
 
-Scadenza del ticket durante l’attesa, rifiuto o chiusura dell’app interrompono l’associazione; il client può iniziare un nuovo tentativo su azione dell’utente. La ricevuta viene controllata anche prima dello scambio remoto. Un annuncio o un permesso del browser da soli non valgono come consenso al modello.
+Ticket expiry, rejection or app shutdown interrupts pairing. A new attempt requires user action. The receipt is checked again before the remote exchange. Announcements and browser permission alone never constitute model consent.
 
-### Interruzione e revoca
+### Disconnect and revocation
 
-Il pannello DEVE offrire «Interrompi collegamento» per singola associazione e per sito. L’azione blocca subito nuove inferenze, annulla quelle in corso, cancella credenziali e concessione locale e tenta la revoca remota. Il fallimento della rete non può ripristinare il collegamento locale.
+The panel MUST offer disconnect controls per association and website. Disconnect immediately blocks new inference, cancels active work, removes local credentials and grants, and attempts remote revocation. Network failure cannot restore a local connection.
 
-Il broker espone `POST <broker>revoke` con la credenziale del dispositivo e rende inutilizzabile il token. La revoca dal sito, la scadenza o una risposta `401`/`403` sugli endpoint del dispositivo fanno interrompere il collegamento anche nell’app. La revoca non può annullare strumenti che il server ha già eseguito.
+`POST <broker>revoke` authenticates with the device credential and invalidates its token. Website revocation, expiry or device-endpoint `401`/`403` responses also stop the app connection. Revocation cannot undo tools already executed by the server.
 
-Il rinnovo oltre la scadenza richiede un nuovo ticket e una nuova conferma; «ricorda per sempre questo sito» rimane fuori dal profilo iniziale.
+Renewal requires a new ticket and confirmation. Permanently remembering a website is outside the initial profile.
 
-## 7. Trasporto dei turni
+## 7. Turn transport
 
-Il primo profilo riusa il funzionamento di `protocol.go`, con un percorso broker dichiarato dal sito. Gli endpoint del dispositivo richiedono `Authorization: Bearer <token>`, protocollo nel corpo JSON dei `POST` e `Cache-Control: no-store` nelle risposte.
+The first profile reuses `protocol.go` with a website-declared broker path. Device endpoints require `Authorization: Bearer <token>`, protocol in POST JSON and `Cache-Control: no-store` responses.
 
-| Endpoint relativo al broker | Metodo | Richiesta e risposta |
+| Relative broker endpoint | Method | Request and response |
 | --- | --- | --- |
-| `pair` | POST | Ticket ed elenco di un modello → credenziale, identificatore e scadenza |
-| `models` | POST | Modello autorizzato disponibile oppure elenco vuoto → `{"ok":true}` |
-| `poll` | POST | `{"protocol":"jase-tunnel-v1"}` → `{"task":null}` oppure `{"task":{...}}` |
-| `active?id=…` | GET | Identificatore del turno → `{"active":true}` oppure `false` |
+| `pair` | POST | Ticket and one-model list → credential, identifier and expiry |
+| `models` | POST | Available approved model or empty list → `{"ok":true}` |
+| `poll` | POST | `{"protocol":"jase-tunnel-v1"}` → `{"task":null}` or `{"task":{...}}` |
+| `active?id=…` | GET | Turn identifier → `{"active":true}` or `false` |
 | `result` | POST | `protocol`, `id`, `result` → `{"ok":true}` |
 | `revoke` | POST | `{"protocol":"jase-tunnel-v1"}` → `{"ok":true}` |
 
-Le risposte del broker usano `200` in caso di successo. `tickets` è riservato alla pagina e alla sua sessione; `pair` usa il ticket una sola volta; gli altri endpoint usano la credenziale del dispositivo. Il broker non deve mai accettare il `connectionId` come credenziale.
+Successful broker responses use `200`. `tickets` is reserved for the page/session; `pair` consumes a ticket once; other endpoints use device credentials. The broker must never accept `connectionId` as a credential.
 
-La struttura di `task`, `message`, `tool`, `toolCall` e `turn` parte dai tipi omonimi in `protocol.go`. Ogni messaggio contiene ruolo e contenuto; gli strumenti descrivono nome, descrizione e schema JSON degli argomenti; il risultato contiene testo e richieste di strumenti con argomenti JSON. Prima di pubblicare una versione stabile devono essere disponibili schemi JSON indipendenti dal Go e fixture condivise con l’SDK server.
+`task`, `message`, `tool`, `toolCall` and `turn` derive from the corresponding Go types. Messages carry role and content; tools carry name, description and argument schema; results contain text and JSON tool calls. A stable public specification needs language-independent JSON schemas and fixtures shared with the server SDK.
 
-Il tunnel DEVE verificare ogni turno contro la concessione locale, anche se il server richiede un modello differente. Richieste di strumenti o output strutturato richiedono le rispettive capacità negoziate. Il sito rimane responsabile di verificare nome e argomenti di ogni strumento rispetto alle definizioni inviate, permessi della sessione e conferme richieste per le azioni.
+Every turn MUST be checked against the local grant, even if the server requests a different model. Tools and structured output require their negotiated capabilities. The provider validates tool names, arguments, session permissions and action confirmations.
 
-**Il modello non è affidabile per il sito.** Il modello gira sul computer del visitatore, che può sostituirlo o rispondere al broker al suo posto: ogni richiesta di strumento, con qualsiasi argomento, va trattata come una chiamata diretta del visitatore a un’API pubblica. Il sito NON DEVE esporre strumenti scritti per un agente interno senza rivederli. Ogni strumento DEVE verificare la sessione della richiesta (`authorize`) oppure essere dichiarato esplicitamente sicuro per qualsiasi visitatore (`public`). La conferma nel pannello protegge il visitatore da un modello manipolato, non il sito dal visitatore. Gli strumenti rilevati dall’installatore restano disabilitati finché il gestore non li abilita.
+**The website cannot trust the model.** Visitors can replace the model or impersonate it to the broker. Every tool request must be treated as a direct visitor call to a public API. Tools written for internal agents MUST NOT be exposed without review. Each tool MUST check the request session (`authorize`) or be explicitly safe for every visitor (`public`). Panel confirmation protects the visitor from a manipulated model, not the provider from the visitor. Discovered tools remain disabled until the provider enables them.
 
-Limiti iniziali: 300 messaggi e 100 definizioni di strumenti per turno, massimo 6 richieste di strumenti nella risposta, massimo 16384 token di output, contesto entro quello del modello autorizzato, corpo del turno di massimo 1 MiB e durata di massimo dieci minuti e comunque entro la scadenza della concessione. Il broker restituisce un turno alla volta per collegamento; il tunnel esegue al massimo un’inferenza alla volta sul computer e rispetta la scadenza anche in coda.
+Initial limits: 300 messages and 100 tool definitions per turn, at most six tool requests per response, at most 16384 output tokens, context within the approved model’s budget, a turn body of at most 1 MiB, and at most ten minutes within the grant’s expiry. The broker delivers one turn per connection at a time. The app performs at most one inference at a time and enforces expiry while queued.
 
-Il broker termina ogni attesa `poll` entro venti secondi; il client usa un timeout di venticinque secondi. Il controllo `active` avviene ogni cinque secondi. Un turno non attivo, una credenziale revocata o tre controlli falliti consecutivi annullano l’inferenza, mantenendo la tolleranza ai brevi errori di rete già prevista. Non vengono consegnati risultati dopo cancellazione o scadenza.
+A broker completes each `poll` within twenty seconds; the app uses a twenty-five-second timeout. `active` checks run every five seconds. Inactive turns, revocation or three consecutive failed checks cancel inference, retaining tolerance for brief network failures. Results are not delivered after cancellation or expiry.
 
-Ogni turno ha un `id` univoco nell’associazione. Il broker accetta un solo risultato per `id`, tratta un reinvio identico come successo e non riesegue gli strumenti. Rifiuta risultati di altre associazioni, scaduti o cancellati. Il profilo iniziale usa risposte complete; streaming e rinnovo delle credenziali richiedono un’estensione futura.
+Each turn has a unique association-scoped `id`. The broker accepts one result per ID, treats an identical retry as success and never re-executes tools. It rejects results from other associations, expired turns or cancelled work. The initial profile returns complete responses; streaming and credential refresh require an extension.
 
-Il modello viene eseguito sul computer, ma i contenuti della conversazione e gli argomenti degli strumenti passano dal server della piattaforma. I pesi, i percorsi locali e i token dei motori rimangono sul computer.
+Inference runs locally, but conversation content and tool arguments pass through the website server. Weights, local paths and engine tokens remain on the computer.
 
-## 8. Confini delle API locali
+## 8. Local API boundaries
 
-Le nuove API separano le autorizzazioni per percorso:
-
-| Superficie | Accesso |
+| Surface | Access |
 | --- | --- |
-| `POST /tunnel/v1/discover` | Origini HTTPS pubbliche idonee; sola creazione di una verifica |
-| `GET /tunnel/v1/discovery` | Origine e ricevuta temporanea corrispondenti |
-| `POST /tunnel/v1/pair` | Origine e ricevuta verificata; apertura di una richiesta di consenso |
-| Inventario, selettori file, log, arresto, revoca locale | Interfaccia locale controllata dall’utente; mai concessi dalla scoperta web |
-| Esecuzione di inferenza | Collegamento del broker autorizzato; nessun endpoint pubblico di inferenza sul loopback |
+| `POST /tunnel/v1/discover` | Eligible public HTTPS origins; create verification only |
+| `GET /tunnel/v1/discovery` | Matching origin and temporary receipt |
+| `POST /tunnel/v1/pair` | Verified origin and receipt; open consent |
+| Inventory, file choosers, logs, shutdown, local revocation | User-controlled local interface; never granted through web discovery |
+| Inference | Authorized broker connection; no public loopback inference endpoint |
 
-Il servizio DEVE ascoltare solo sul loopback e verificare esattamente l’header `Host`. Per i percorsi web richiede un solo `Origin` canonico valido; rifiuta origini opache, `null`, HTTP pubblico, userinfo, percorsi, query e frammenti. Il corpo non può sostituire l’origine.
+The service MUST listen only on loopback and check the exact `Host` header. Web routes require one valid canonical `Origin`; opaque origins, `null`, public HTTP, userinfo, paths, queries and fragments are rejected. Bodies cannot override origins.
 
-Le risposte CORS DEVONO riflettere esclusivamente l’origine idonea per quello specifico percorso, con `Vary: Origin`, metodi previsti e soli header `Content-Type` e `Authorization`. Niente wildcard e niente credenziali CORS. Le modifiche richiedono JSON e limiti di corpo; un preflight non cambia lo stato e non produce una notifica. Le pagine locali di gestione devono avere una propria protezione contro richieste e incorporamenti da siti esterni.
+CORS responses MUST reflect only the eligible origin for that route, with `Vary: Origin`, expected methods and only `Content-Type`/`Authorization` headers. No wildcard or CORS credentials. Mutations require JSON and bounded bodies. Preflight changes no state and produces no notification. Local management pages need their own protections against external requests and embedding.
 
-La nuova scoperta NON DEVE usare la risposta attuale `/v1/status`: contiene disponibilità dei modelli, nomi di file e identificativi di collegamenti. Non basta trasformare `allowedOrigin` in «qualsiasi HTTPS»: oggi la stessa funzione protegge anche operazioni amministrative e destinazioni remote.
+Discovery MUST NOT reuse `/v1/status`, which contains model availability and connection information. Merely replacing an origin check with “any HTTPS” is unsafe: administrative operations and remote destinations have separate protection boundaries.
 
-L’header `Origin` e CORS proteggono la superficie browser; non autenticano un altro programma già in esecuzione sul computer. Il consenso locale e l’isolamento delle credenziali restano necessari.
+`Origin` and CORS protect browser access; they do not authenticate another program already running on the computer. Local consent and isolated credentials remain necessary.
 
-### Verifica di rete dei siti
+### Website network verification
 
-La verifica di un dominio nuovo introduce richieste remote controllate da input web. Il tunnel DEVE:
+New-domain verification makes remote requests controlled by web input. The tunnel MUST:
 
-- Ammettere in produzione solo origini HTTPS sulla porta 443 con nomi DNS pubblici; verificare normalmente i certificati TLS.
-- Rifiutare destinazioni IP letterali, nomi locali e risoluzioni verso loopback, reti private, link-local, multicast, indirizzi riservati o non globalmente instradabili, incluse forme IPv4 in IPv6.
-- Controllare tutti gli indirizzi ottenuti e vincolare la connessione a un indirizzo verificato, mantenendo hostname e SNI per TLS; ripetere il controllo a ogni nuova connessione anche al broker. Un semplice controllo DNS prima di una seconda risoluzione non basta.
-- Disabilitare proxy automatici e redirect; nessun inoltro di credenziali verso un’altra origine. Limitare la verifica del manifest a cinque secondi, sedici KiB di corpo e otto KiB di header.
-- Limitare a quattro verifiche concorrenti e a una verifica del manifest per origine al minuto. Le richieste di scoperta sono limitate per origine (venti al minuto, trenta ricevute valide), così un sito non consuma il margine degli altri, e globalmente (centoventi al minuto, trecento ricevute). Una sola finestra di consenso aperta per origine; dopo «Rifiuta» la stessa origine non può riaprirla per due minuti e porta la finestra in primo piano al massimo ogni trenta secondi. Rispondere `429` con `Retry-After` quando necessario.
-- Ignorare i campi sconosciuti nei corpi inviati dalle pagine: app e modulo dei siti si aggiornano in tempi diversi.
+- Allow only public DNS HTTPS origins on port 443 in production, with normal TLS certificate verification.
+- Reject literal IP destinations, local names and resolutions into loopback, private, link-local, multicast, reserved or non-global addresses, including IPv4 embedded in IPv6.
+- Check every resolved address and pin the connection to a verified address, retaining hostname and TLS SNI. Repeat for each new connection, including broker access. A DNS check followed by another resolution is insufficient.
+- Disable automatic proxies and redirects; never forward credentials to another origin. Limit manifest verification to five seconds, sixteen KiB of body and eight KiB of headers.
+- Limit concurrent verification to four and manifest verification to once per origin per minute. Discovery quotas are per-origin (twenty per minute, thirty unexpired receipts) and global (120 per minute, 300 receipts). Only one consent dialog per origin may be open. After **Decline**, that origin cannot reopen it for two minutes; foreground focus is limited to once every thirty seconds. Use `429` and `Retry-After` when necessary.
+- Ignore unknown fields in page request bodies; app and SDK updates occur independently.
 
-Le origini HTTP loopback restano possibili soltanto in modalità di sviluppo esplicita, con stato e concessioni separati da quelli di produzione. Non vengono abilitate da un campo del manifest.
+HTTP loopback website origins require explicit development mode, with state and grants separate from production. Manifest fields cannot enable it.
 
-### Errori
+### Errors
 
-Formato comune:
+Common format:
 
 ```json
-{"error":{"code":"unsupported_protocol","message":"Versione del protocollo non supportata."}}
+{"error":{"code":"unsupported_protocol","message":"Unsupported protocol version."}}
 ```
 
-Codici minimi: `invalid_request` (400), `unsupported_protocol` (400), `origin_mismatch` (403), `not_authorized` (403), `pairing_in_progress` (409), `discovery_expired` (410), `rate_limited` (429), `broker_unavailable` (502). I fallimenti asincroni espongono lo stato e un codice senza dettagli di rete interna, token o inventario locale. Le risposte non vengono memorizzate in cache.
+Minimum codes: `invalid_request` (400), `unsupported_protocol` (400), `origin_mismatch` (403), `not_authorized` (403), `pairing_in_progress` (409), `discovery_expired` (410), `rate_limited` (429), `broker_unavailable` (502). Asynchronous failures expose state and a code without internal network details, credentials or model inventories. Responses are never cached.
 
-## 9. Integrazione nel browser
+## 9. Browser integration
 
-Il futuro SDK web deve offrire scoperta, lettura dello stato e associazione, gestendo timeout, cancellazione e gli stati del browser. La pagina deve autorizzare il servizio loopback nella propria direttiva CSP `connect-src`. L’SDK deve operare nella pagina principale visibile; niente tentativi da iframe di terzi, service worker o schede nascoste.
+The web SDK provides discovery, state and pairing, with timeouts, cancellation and browser-state handling. The page must allow loopback in its CSP `connect-src`. The SDK operates in the visible top-level page, not third-party iframes, service workers or hidden tabs.
 
-La connessione usa `mode: "cors"`, `credentials: "omit"`, `redirect: "error"` e, dove supportato, `targetAddressSpace: "loopback"`. Un’eventuale Permissions API va rilevata per funzionalità con gestione dell’errore; la mancanza dell’API non dimostra che l’accesso sia permesso. In quel caso si propone un tentativo su clic.
+Connections use `mode: "cors"`, `credentials: "omit"`, `redirect: "error"` and, where supported, `targetAddressSpace: "loopback"`. Feature-detect Permissions API support and handle errors. Absence of that API never proves permission; offer a click-triggered attempt instead.
 
-Quando un tentativo fallisce, il sito mostra «Non riesco a contattare Jase Tunnel: verifica che sia aperto e che il browser permetta il collegamento locale». Un errore di rete non distingue con certezza app assente, permesso negato, CSP o blocco del browser. L’SDK non deve tradurlo automaticamente in «app non installata», ripetere richieste di permesso o esplorare altre porte.
+Failure should say “Cannot reach Jase Tunnel. Check that it is running and that your browser allows local connections.” A network error does not distinguish an absent app, denied permission, CSP or browser blocking. Do not automatically label it “app not installed,” repeat permission requests or scan other ports.
 
-I permessi Local Network Access si aggiungono ai controlli CORS e al consenso nell’app. Il vecchio header `Access-Control-Allow-Private-Network` presente nel codice non garantisce l’accesso nei browser che richiedono il permesso utente. La guida corrente di Chrome descrive anche permessi granulari per rete locale e loopback; i nomi supportati vanno rilevati e verificati sulle versioni provate.
+Local Network Access permission is additional to CORS and native app consent. `Access-Control-Allow-Private-Network` alone does not guarantee browser access. Chrome guidance also describes granular local-network and loopback permissions; feature-detect and verify names on tested browser versions.
 
-Un protocollo URL per aprire l’app può diventare un percorso alternativo esplicito, ma richiede registrazione nei pacchetti e un’associazione verificata. Non è implementato oggi e non costituisce una soluzione per notificare silenziosamente durante tutta la navigazione.
+A custom URL scheme could provide an explicit alternative for opening the app, but requires package registration and verified pairing. It is not implemented and would not provide silent notifications for all browsing.
 
-Riferimenti browser consultati il 17 ottobre 2026:
+Browser references consulted on October 17, 2026:
 
 - [Chrome: Local Network Access](https://developer.chrome.com/blog/local-network-access?hl=en).
-- [GoogleChrome: indicazioni correnti per rete locale e loopback](https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/modern-web-guidance/guides/security/local-network-access.md).
+- [GoogleChrome: local-network and loopback guidance](https://github.com/GoogleChrome/modern-web-guidance/blob/main/skills/modern-web-guidance/guides/security/local-network-access.md).
 - [W3C: Secure Contexts](https://www.w3.org/TR/secure-contexts/).
 
-## 10. Adozione e implementazione
+## 10. Adoption and implementation
 
-Un sito aderisce pubblicando il manifest, integrando il client web e implementando il broker con isolamento delle sessioni e autorizzazione degli strumenti. Non serve una lista centrale di domini approvati; ogni utente autorizza i propri collegamenti. Licenza del protocollo, dell’SDK e del client e regole d’uso del nome devono essere definite prima di presentarli come standard pubblico aperto.
+A provider publishes the manifest, integrates the page client and implements session-isolated brokerage and tool authorization. No central domain allowlist is required; each person approves their own connections. Code/protocol licensing and name use are documented in the project license and trademark policy.
 
-Ordine di implementazione:
+Implementation order:
 
-1. **Contratti condivisi:** schemi JSON del manifest e dei messaggi, fixture valide e non valide, mini broker e pagina di esempio.
-2. **Scoperta:** verifica sicura delle origini, nuove API locali, ricevute, limiti e stato nel pannello; nessuna apertura delle API attuali.
-3. **Consenso e notifiche:** scelta del modello, concessioni con scadenza, pannello dei siti, rifiuto, silenziamento e revoca; interfacce equivalenti sui sistemi dichiarati supportati.
-4. **Trasporto:** broker configurabile per concessione, controllo del modello a ogni turno, annullamento per singolo collegamento, scadenza e revoca immediata.
-5. **SDK e adozione:** client web, installatore per i framework più diffusi, due piattaforme indipendenti, documentazione per integratori e matrice di compatibilità effettivamente verificata.
+1. **Shared contracts:** manifest/message JSON schemas, valid/invalid fixtures, minimal broker and example page.
+2. **Discovery:** safe origin verification, separate local APIs, receipts, quotas and panel state, without opening administrative APIs.
+3. **Consent and notifications:** model selection, expiring grants, website panel, rejection, muting and revocation, with equivalent supported desktop interfaces.
+4. **Transport:** per-grant broker, model enforcement every turn, connection-scoped cancellation, expiry and immediate revocation.
+5. **SDK and adoption:** page client, common-framework installers, independent example websites, integrator documentation and a verified compatibility matrix.
 
-Il protocollo a sito singolo delle versioni 0.2 e precedenti non esiste più: all’avvio il tunnel scarta le sue credenziali e i suoi endpoint locali rispondono `404`. Una futura modifica incompatibile usa un nuovo identificatore di protocollo.
+The single-site protocol from 0.2 and earlier is gone. Startup discards its credentials and its local endpoints return `404`. Future incompatible changes require a new protocol identifier.
 
-### Criteri di accettazione
+### Acceptance criteria
 
-- Una piattaforma qualsiasi viene riconosciuta senza modificare o ricompilare l’app.
-- L’app avvisa e mostra il dominio anche con modello assente o notifiche di sistema disabilitate.
-- Prima della conferma non partono inferenze e non viene inviato un inventario di modelli.
-- Due piattaforme e due sessioni della stessa piattaforma hanno credenziali, modelli e stato isolati.
-- Manifest contraffatti nel corpo, redirect, DNS rebinding, destinazioni private, ricevute riutilizzate da altre origini e ticket scaduti vengono rifiutati.
-- Scoperta e polling non permettono di leggere altri collegamenti, importare pesi, aprire selettori o chiudere l’app.
-- Revoca, scadenza e rifiuto non vengono annullati da nuovi annunci; la revoca interrompe anche l’inferenza in corso.
-- Il modello scelto e il contesto autorizzato sono rispettati anche con richieste del broker fuori profilo.
-- La piattaforma esegue ciascun risultato una sola volta e applica le autorizzazioni degli strumenti.
-- Sono provati Chrome/Edge, Firefox e Safari nelle versioni distribuite: primo accesso, permesso accordato/negato, CSP, app chiusa/aperta e riapertura della pagina. Si dichiara il supporto solo per le combinazioni effettivamente funzionanti.
+- Recognize a new provider without modifying or rebuilding the app.
+- Display the verified domain even without a ready model or system notifications.
+- No inference or model inventory before confirmation.
+- Isolate credentials, models and state between two providers and two sessions on the same provider.
+- Reject forged origins, redirects, DNS rebinding, private destinations, cross-origin receipts and expired tickets.
+- Discovery and polling cannot read other connections, import weights, open file choosers or quit the app.
+- Announcements never undo revocation, expiry or rejection; revocation cancels running inference.
+- Enforce the chosen model and context even against out-of-profile broker requests.
+- Execute each result once and enforce tool authorization.
+- Verify Chrome/Edge, Firefox and Safari versions for first contact, permission grant/denial, CSP, app open/closed and page reopening. Claim support only for combinations actually tested.
 
-Il primo obiettivo verificabile è una dimostrazione completa con due piattaforme, dalla visita della pagina alla notifica, al consenso e a una richiesta di strumento eseguita con la LLM dell’utente.
+The first verifiable objective is a complete two-provider demonstration, from page visit and notification through consent to a tool call using the person’s local LLM.

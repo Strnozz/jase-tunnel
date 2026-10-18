@@ -138,7 +138,7 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	if approval == nil || len(approval.Models) != 1 {
 		t.Fatal("no native consent request")
 	}
-	if approval.Site != "shop.example.com" || !strings.HasPrefix(approval.Text, "Indirizzo verificato: shop.example.com\n") {
+	if approval.Site != "shop.example.com" || !strings.HasPrefix(approval.Text, "Verified address: shop.example.com\n") {
 		t.Fatalf("consent does not lead with the verified address: %q", approval.Text)
 	}
 	if a.claimWebApproval() != nil {
@@ -152,7 +152,7 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	if len(links) != 1 || links[0].Model.Key != "ollama:fixture" {
 		t.Fatal("model grant missing")
 	}
-	// «Scollega siti» removes every grant, of every site, and stops their inferences.
+	// «Disconnect websites» removes every grant, of every site, and stops their inferences.
 	active, cancel := context.WithCancel(context.Background())
 	otherActive, otherCancel := context.WithCancel(context.Background())
 	other := link{Protocol: webProtocol, Origin: "https://tools.example.org", Broker: "/api/jase-tunnel/v1/", Model: links[0].Model, ExpiresAt: links[0].ExpiresAt, Token: strings.Repeat("d", 64), ConnectionID: strings.Repeat("e", 32)}
@@ -265,7 +265,7 @@ func TestAnnouncedPageNotifiesOnceAndClickLetsItContinue(t *testing.T) {
 		t.Fatal("a page button produced a notification")
 	}
 	receipt, id := announce("https://shop.example.com", true)
-	if count() != 1 || !strings.Contains(notified[0], "shop.example.com accetta Jase Tunnel") {
+	if count() != 1 || !strings.Contains(notified[0], "shop.example.com supports Jase Tunnel") {
 		t.Fatalf("no notification for an announcing page: %v", notified)
 	}
 	a.webManager().mu.Lock()
@@ -315,7 +315,7 @@ func TestWebDialerTriesEveryVerifiedAddress(t *testing.T) {
 	conn.Close()
 }
 
-// «Scollega siti» also tells each site's broker, so its pages stop seeing the grant.
+// «Disconnect websites» also tells each site's broker, so its pages stop seeing the grant.
 func TestRevocationReachesTheSitesBroker(t *testing.T) {
 	a := newTestApp(t)
 	revoked := make(chan string, 1)

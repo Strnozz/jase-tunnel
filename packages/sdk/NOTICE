@@ -1,8 +1,8 @@
-jase-tunnel (modulo per i siti di Jase Tunnel)
+jase-tunnel (Jase Tunnel website SDK)
 Copyright 2026 Simone Romano
 
-Questo pacchetto è distribuito con la Apache License, Version 2.0 (file LICENSE).
+This package is distributed under the Apache License, Version 2.0 (see LICENSE).
 
-Il nome «Jase Tunnel», il logo e gli altri segni identificativi del progetto non
-sono concessi dalla Apache License: il loro uso è regolato dalla politica del
-marchio, https://github.com/Strnozz/jase-tunnel/blob/main/TRADEMARK_POLICY.md
+The Jase Tunnel name, logo and other project identifiers are not granted by the
+Apache License. Their use is governed by the trademark policy:
+https://github.com/Strnozz/jase-tunnel/blob/main/TRADEMARK_POLICY.md

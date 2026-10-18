@@ -46,7 +46,7 @@ const (
 	discoverGlobal    = 120 // discoveries per minute, all sites together
 	pendingPerOrigin  = 30  // unexpired receipts per site
 	pendingGlobal     = 300 // unexpired receipts, all sites together
-	// After «Rifiuta» the same site cannot reopen the consent dialog for a while.
+	// After «Decline» the same site cannot reopen the consent dialog for a while.
 	consentCooldown = 2 * time.Minute
 	// A site brings the window to the front at most this often.
 	focusEvery = 30 * time.Second
@@ -65,7 +65,7 @@ type webManager struct {
 	checking int
 	// Discoveries per site in the current minute.
 	perOrigin map[string]*rateWindow
-	// Last «Rifiuta» and last window focus, per site.
+	// Last «Decline» and last window focus, per site.
 	rejected map[string]time.Time
 	focused  map[string]time.Time
 	// Manifests verified in the last five minutes: another page of the same site is
@@ -117,12 +117,12 @@ func webFail(w http.ResponseWriter, status int, code, message string) {
 func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if len(r.Header.Values("Origin")) != 1 || !webOrigin(origin) {
-		webFail(w, 403, "origin_mismatch", "Origine del sito non valida.")
+		webFail(w, 403, "origin_mismatch", "Invalid website origin.")
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/tunnel/v1/")
 	if path != "discover" && path != "discovery" && path != "pair" {
-		webFail(w, 404, "not_found", "Risorsa non trovata.")
+		webFail(w, 404, "not_found", "Resource not found.")
 		return
 	}
 	w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -142,7 +142,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 			Announce bool   `json:"announce,omitempty"`
 		}
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decodeWeb(w, r, &input, 4096) != nil || input.Protocol != webProtocol {
-			webFail(w, 400, "invalid_request", "Richiesta non valida.")
+			webFail(w, 400, "invalid_request", "Invalid request.")
 			return
 		}
 		m := a.webManager()
@@ -189,7 +189,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		if m.count >= discoverGlobal || len(m.requests) >= pendingGlobal || window.count >= discoverPerOrigin || outstanding >= pendingPerOrigin || !recent && (m.checking >= 4 || !m.checked[origin].IsZero()) {
 			m.mu.Unlock()
 			w.Header().Set("Retry-After", "60")
-			webFail(w, 429, "rate_limited", "Attendi un minuto prima di rilevare di nuovo questo sito.")
+			webFail(w, 429, "rate_limited", "Wait a minute before detecting this website again.")
 			return
 		}
 		receipt := webSecret(32)
@@ -207,7 +207,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		}
 		m.mu.Unlock()
 		log.Printf("Discovery from %s (announce %v, verified earlier %v)", origin, input.Announce, recent)
-		a.recordFor(origin, "receive", "info", "La pagina ha contattato Jase Tunnel", map[bool]string{true: "Annuncio automatico durante la navigazione.", false: "Pulsante «Collega» della pagina."}[input.Announce])
+		a.recordFor(origin, "receive", "info", "The page contacted Jase Tunnel", map[bool]string{true: "Automatic announcement while browsing.", false: "The page’s Connect button."}[input.Announce])
 		if !recent {
 			go a.verifyWebSite(d.ID)
 		} else if input.Announce {
@@ -227,7 +227,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.Origin != origin {
 		m.mu.Unlock()
-		webFail(w, 403, "origin_mismatch", "Ricevuta non valida per questo sito.")
+		webFail(w, 403, "origin_mismatch", "Invalid receipt for this website.")
 		return
 	}
 	if path == "discovery" && r.Method == "GET" {
@@ -242,22 +242,22 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 	if path == "pair" && r.Method == "POST" {
 		if d.State != "compatible" && d.State != "requested" {
 			m.mu.Unlock()
-			webFail(w, 409, "pairing_in_progress", "Associazione non disponibile. Riprova il rilevamento.")
+			webFail(w, 409, "pairing_in_progress", "Pairing is unavailable. Try detecting the website again.")
 			return
 		}
 		now := time.Now()
-		// One consent dialog per site at a time, and none for a while after «Rifiuta»:
+		// One consent dialog per site at a time, and none for a while after «Decline»:
 		// a page cannot keep reopening the dialog.
 		if at := m.rejected[origin]; !at.IsZero() && now.Sub(at) < consentCooldown {
 			m.mu.Unlock()
 			w.Header().Set("Retry-After", fmt.Sprint(int((consentCooldown-now.Sub(at)).Seconds())+1))
-			webFail(w, 429, "consent_cooldown", "Hai appena rifiutato questo sito. Riprova tra qualche minuto.")
+			webFail(w, 429, "consent_cooldown", "You just declined this website. Try again in a few minutes.")
 			return
 		}
 		for _, other := range m.requests {
 			if other != d && other.Origin == origin && (other.State == "awaiting_approval" || other.State == "connecting") && other.ExpiresAt > now.UnixMilli() {
 				m.mu.Unlock()
-				webFail(w, 409, "pairing_in_progress", "Una richiesta di consenso per questo sito è già aperta.")
+				webFail(w, 409, "pairing_in_progress", "A consent request for this website is already open.")
 				return
 			}
 		}
@@ -267,12 +267,12 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		}
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decodeWeb(w, r, &input, 4096) != nil || input.Protocol != webProtocol || len(input.Ticket) != 64 {
 			m.mu.Unlock()
-			webFail(w, 400, "invalid_request", "Associazione non valida.")
+			webFail(w, 400, "invalid_request", "Invalid pairing request.")
 			return
 		}
 		if _, err := hex.DecodeString(input.Ticket); err != nil {
 			m.mu.Unlock()
-			webFail(w, 400, "invalid_request", "Ticket non valido.")
+			webFail(w, 400, "invalid_request", "Invalid ticket.")
 			return
 		}
 		d.State = "awaiting_approval"
@@ -289,7 +289,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		m.mu.Unlock()
-		a.recordFor(origin, "app", "info", "Consenso richiesto", "Il sito chiede il tunnel: scegli il modello nel pannello Jase Tunnel.")
+		a.recordFor(origin, "app", "info", "Consent requested", "The website is requesting a tunnel: choose a model in the Jase Tunnel panel.")
 		if a.nativeUI && focus {
 			showDesktopUI()
 		}
@@ -297,7 +297,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m.mu.Unlock()
-	webFail(w, 405, "method_not_allowed", "Metodo non consentito.")
+	webFail(w, 405, "method_not_allowed", "Method not allowed.")
 }
 
 func (a *application) verifyWebSite(id string) {
@@ -360,7 +360,7 @@ func (a *application) verifyWebSite(id string) {
 	m.mu.Unlock()
 	if err != nil {
 		log.Printf("Discovery of %s: incompatible (%v)", origin, err)
-		a.recordFor(origin, "app", "error", "Sito non compatibile", err.Error())
+		a.recordFor(origin, "app", "error", "Unsupported website", err.Error())
 	}
 	if err == nil && announced {
 		a.announceCompatible(id, origin, manifest.Name)
@@ -373,7 +373,7 @@ func (a *application) verifyWebSite(id string) {
 // every announcement, also when notifications are off or unavailable.
 func (a *application) announceCompatible(id, origin, name string) {
 	site := strings.TrimPrefix(origin, "https://")
-	a.recordFor(origin, "app", "info", "Pagina compatibile con Jase Tunnel", "Si presenta come «"+name+"» (nome non verificato).")
+	a.recordFor(origin, "app", "info", "Page supports Jase Tunnel", "Identifies itself as “"+name+"” (unverified name).")
 	if a.originConnected(origin) {
 		log.Printf("Announcement of %s: no notification, already connected", site)
 		return
@@ -399,7 +399,7 @@ func (a *application) announceCompatible(id, origin, name string) {
 	if !m.notified[origin].IsZero() || len(m.notices) >= 3 {
 		m.mu.Unlock()
 		log.Printf("Announcement of %s: no notification, limit reached", site)
-		a.recordFor(origin, "app", "info", "Notifica non ripetuta", "Al massimo una notifica per sito al giorno e tre ogni dieci minuti.")
+		a.recordFor(origin, "app", "info", "Notification not repeated", "At most one notification per website per day and three every ten minutes.")
 		return
 	}
 	m.notified[origin] = now
@@ -407,7 +407,7 @@ func (a *application) announceCompatible(id, origin, name string) {
 	m.mu.Unlock()
 	log.Printf("Announcement of %s: notification requested (native %v)", site, a.notify != nil)
 	if a.notify != nil {
-		a.notify(id, site+" accetta Jase Tunnel", "Collegare la tua LLM locale a questa pagina? Sceglierai il modello prima di qualsiasi accesso.")
+		a.notify(id, site+" supports Jase Tunnel", "Connect your local LLM to this page? You will choose a model before any access.")
 	}
 }
 
@@ -426,11 +426,11 @@ func (a *application) requestWebConnection(id string) {
 	}
 	m.mu.Unlock()
 	if origin == "" {
-		a.record("app", "info", "Annuncio scaduto", "Torna alla pagina del sito e usa il suo pulsante Jase Tunnel per collegarti.")
+		a.record("app", "info", "Announcement expired", "Return to the website and use its Jase Tunnel button to connect.")
 		showDesktopUI()
 		return
 	}
-	a.recordFor(origin, "app", "info", "Collegamento richiesto dalla notifica", "Se la pagina è ancora aperta, scegli qui il modello da autorizzare.")
+	a.recordFor(origin, "app", "info", "Connection requested from notification", "If the page is still open, choose a model to allow here.")
 }
 
 func (a *application) originConnected(origin string) bool {
@@ -497,7 +497,7 @@ func (a *application) claimWebApproval() *webApproval {
 // Any site can borrow a well-known name in its manifest: the verified address leads,
 // the declared name is labelled as the site's own claim.
 func webConsentText(p *webApproval) string {
-	return "Indirizzo verificato: " + p.Site + "\nNome dichiarato dal sito (non verificato): " + p.Name + "\n\nIl sito invierà messaggi e dati al modello scelto. Risposte e richieste di strumenti torneranno al server del sito. I pesi restano sul computer. Il collegamento dura al massimo 30 minuti.\n\nConsenti soltanto se riconosci l’indirizzo " + p.Site + "."
+	return "Verified address: " + p.Site + "\nWebsite-provided name (unverified): " + p.Name + "\n\nThe website will send messages and data to your selected model. Responses and tool requests will return to the website’s server. Model weights stay on this computer. The connection lasts up to 30 minutes.\n\nAllow only if you recognize the address " + p.Site + "."
 }
 func (a *application) answerWebConsent(id, key string) {
 	m := a.webManager()
@@ -524,7 +524,7 @@ func (a *application) answerWebConsent(id, key string) {
 		}
 		m.rejected[current.Origin] = now
 		m.mu.Unlock()
-		a.recordFor(current.Origin, "app", "info", "Collegamento rifiutato", "Hai rifiutato il tunnel nel pannello.")
+		a.recordFor(current.Origin, "app", "info", "Connection declined", "You declined the tunnel in the panel.")
 		return
 	}
 	a.mu.RLock()
@@ -555,7 +555,7 @@ func (a *application) answerWebConsent(id, key string) {
 		ConnectionID string `json:"connectionId"`
 		ExpiresAt    int64  `json:"expiresAt"`
 	}
-	err := a.remote(ctx, grant, "pair", map[string]any{"protocol": webProtocol, "ticket": ticket, "label": "Il mio computer", "models": []model{chosen}}, &result)
+	err := a.remote(ctx, grant, "pair", map[string]any{"protocol": webProtocol, "ticket": ticket, "label": "My computer", "models": []model{chosen}}, &result)
 	if err == nil && (result.Protocol != webProtocol || len(result.Token) != 64 || len(result.ConnectionID) != 32 || result.ExpiresAt <= time.Now().UnixMilli()) {
 		err = errors.New("invalid grant")
 	}
@@ -566,7 +566,7 @@ func (a *application) answerWebConsent(id, key string) {
 	}
 	if err != nil {
 		current.State = "failed"
-		a.recordFor(current.Origin, "app", "error", "Collegamento non riuscito", "Il broker del sito non ha accettato il ticket: "+err.Error())
+		a.recordFor(current.Origin, "app", "error", "Connection failed", "The website broker did not accept the ticket: "+err.Error())
 		return
 	}
 	grant.Token = result.Token
@@ -595,11 +595,11 @@ func (a *application) answerWebConsent(id, key string) {
 	}
 	current.State = "connected"
 	current.ConnectionID = grant.ConnectionID
-	a.recordFor(grant.Origin, "app", "info", "Tunnel aperto", chosen.Name+" · fino alle "+time.UnixMilli(grant.ExpiresAt).Format("15:04"))
+	a.recordFor(grant.Origin, "app", "info", "Tunnel aperto", chosen.Name+" · until "+time.UnixMilli(grant.ExpiresAt).Format("15:04"))
 	a.startLink(grant)
 }
 
-// «Scollega siti» removes every grant and stops their inferences. Their poll loops end
+// «Disconnect websites» removes every grant and stops their inferences. Their poll loops end
 // at the next check; a site can pair again only through a new consent.
 func (a *application) revokeLinks() {
 	a.mu.Lock()
@@ -619,14 +619,14 @@ func (a *application) revokeLinks() {
 		d.Ticket = ""
 	}
 	m.mu.Unlock()
-	a.record("app", "info", "Siti scollegati", "Tutti i collegamenti sono stati revocati e le inferenze in corso annullate.")
+	a.record("app", "info", "Websites disconnected", "All connections were revoked and running inference was cancelled.")
 	for _, c := range revoked {
-		a.recordFor(c.Origin, "app", "info", "Tunnel chiuso", "Scollegato dal pannello.")
+		a.recordFor(c.Origin, "app", "info", "Tunnel closed", "Disconnected from the panel.")
 		go a.notifyRevocation(c)
 	}
 }
 
-// revokeSite closes the tunnels of one site only (its «Scollega sito» button).
+// revokeSite closes the tunnels of one site only (its «Disconnect website» button).
 func (a *application) revokeSite(origin string) {
 	a.mu.Lock()
 	kept, revoked := []link{}, []link{}
@@ -653,7 +653,7 @@ func (a *application) revokeSite(origin string) {
 	}
 	m.mu.Unlock()
 	if len(revoked) > 0 {
-		a.recordFor(origin, "app", "info", "Tunnel chiuso", "Scollegato dal pannello. Le inferenze in corso sono state annullate.")
+		a.recordFor(origin, "app", "info", "Tunnel closed", "Disconnected from the panel. Running inference was cancelled.")
 	}
 	for _, c := range revoked {
 		go a.notifyRevocation(c)

@@ -30,13 +30,13 @@ export async function loopbackPermission() {
 
 export class TunnelClient {
   constructor({ path = '/api/jase-tunnel/v1/', onState = () => {} } = {}) {
-    if (!/^\/(?:[a-zA-Z0-9_-]+\/)+$/.test(path)) throw new Error('Percorso del modulo non valido.');
+    if (!/^\/(?:[a-zA-Z0-9_-]+\/)+$/.test(path)) throw new Error('Invalid module path.');
     this.path = path; this.onState = onState; this.receipt = undefined;
   }
   async request(url, options = {}, loopback = false) {
     const response = await fetch(url, { ...options, cache:'no-store', redirect:'error', credentials: loopback ? 'omit' : 'same-origin', ...(loopback ? { mode:'cors', targetAddressSpace:'loopback' } : {}), signal: options.signal ?? AbortSignal.timeout(25_000) });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message ?? 'Collegamento non disponibile.');
+    if (!response.ok) throw new Error(data.error?.message ?? 'Connection unavailable.');
     return data;
   }
   async platform() {
@@ -75,7 +75,7 @@ export class TunnelClient {
     return false;
   }
   // Tell Jase Tunnel that this page accepts it. The app verifies the site and may notify
-  // the person; when they choose «Collega» there, the page continues to the consent
+  // the person; when they choose «Connect» there, the page continues to the consent
   // dialog. Resolves with the session once connected, or null when nothing happened.
   async announce() {
     const fresh = async () => this.remember(await this.request(local+'discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({protocol:TUNNEL_PROTOCOL,announce:true})},true));
@@ -92,12 +92,12 @@ export class TunnelClient {
     } catch { return null; }
   }
   async discover() {
-    if (window.top !== window || document.visibilityState === 'hidden') throw new Error('Apri il servizio in una scheda visibile.');
+    if (window.top !== window || document.visibilityState === 'hidden') throw new Error('Open the website in a visible tab.');
     try {
       this.remember(await this.request(local+'discover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({protocol:TUNNEL_PROTOCOL})},true));
       return await this.waitFor(['compatible','requested','connected']);
     } catch(error) {
-      if (error instanceof TypeError || /fetch|network|load|abort|timeout/i.test(error.message)) throw new Error('Non riesco a contattare Jase Tunnel: verifica che sia aperto e che il browser permetta il collegamento locale.');
+      if (error instanceof TypeError || /fetch|network|load|abort|timeout/i.test(error.message)) throw new Error('Cannot reach Jase Tunnel. Check that it is running and that your browser allows local connections.');
       throw error;
     }
   }
@@ -105,18 +105,18 @@ export class TunnelClient {
   async waitFor(states, quiet = false) {
     while(Date.now()<this.expiresAt) {
       if(document.visibilityState==='hidden') {
-        if(!quiet) throw new Error('Torna alla scheda e premi Collega.');
+        if(!quiet) throw new Error('Return to the tab and click Connect.');
         await new Promise(resolve=>document.addEventListener('visibilitychange',resolve,{once:true}));
         continue;
       }
       const state=await this.request(local+'discovery',{headers:{Authorization:'Bearer '+this.receipt}},true);
       this.onState(state);
       if(states.includes(state.state)) return state;
-      if(['rejected','failed','incompatible','expired'].includes(state.state)) { this.forget(); throw new Error(state.state==='rejected'?'Collegamento rifiutato nell’app.':'Il sito non ha completato il collegamento a Jase Tunnel.'); }
+      if(['rejected','failed','incompatible','expired'].includes(state.state)) { this.forget(); throw new Error(state.state==='rejected'?'Connection declined in the app.':'The website did not complete the Jase Tunnel connection.'); }
       await new Promise(resolve=>setTimeout(resolve,2000));
     }
     this.forget();
-    throw new Error('Collegamento scaduto. Premi di nuovo Collega.');
+    throw new Error('Connection expired. Click Connect again.');
   }
   async connect() {
     if(!this.receipt || Date.now()>=this.expiresAt) await this.discover();

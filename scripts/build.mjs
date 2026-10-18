@@ -65,7 +65,17 @@ try {
     const name = arch === "amd64" ? "x64" : arch;
     const windows = `Jase-Tunnel-Windows-${name}.exe`; compile("windows", arch, join(output, windows)); record(`windows-${name}`, windows);
     const dir = join(temporary, `linux-${name}`, "Jase-Tunnel"); mkdirSync(dir, { recursive: true }); compile("linux", arch, join(dir, "jase-tunnel")); chmodSync(join(dir, "jase-tunnel"), 0o755);
-    writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia jase-tunnel: si apre il pannello nativo con modelli, collegamenti e registro attività. Serve GTK 3 (libgtk-3-0 oppure libgtk-3-0t64 su Ubuntu/Debian).\n\nMentre navighi, le pagine che accettano Jase Tunnel si annunciano e ricevi una notifica (serve notify-send, pacchetto libnotify-bin). Il collegamento parte solo dopo che hai scelto il modello nel pannello e dura al massimo 30 minuti.\n\nIl menu dell’icona offre Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Per l’area di notifica è consigliato Ayatana AppIndicator; sui desktop senza supporto alle icone, chiudere la finestra la riduce a icona nella barra applicazioni. Per terminare il processo scegli Chiudi Jase Tunnel nel pannello o nel menu.\n\nPer la diagnostica da terminale: ./jase-tunnel --headless --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
+    writeFileSync(join(dir, "README.txt"), `Jase Tunnel
+
+Extract this directory and run jase-tunnel to open the native panel with models, connections and the activity log. GTK 3 is required (libgtk-3-0 or libgtk-3-0t64 on Ubuntu/Debian).
+
+As you browse, compatible pages announce themselves and you receive a notification (requires notify-send from libnotify-bin). Connections start only after you choose a model in the panel and last up to 30 minutes.
+
+The tray menu offers Open Jase Tunnel, Add weights and Quit Jase Tunnel. Ayatana AppIndicator is recommended. On desktops without tray icons, closing the window minimizes it to the taskbar. Choose Quit Jase Tunnel in the panel or menu to stop the process.
+
+For terminal diagnostics: ./jase-tunnel --headless --foreground
+Models run through Ollama or LM Studio on your computer. No account or cloud service is required.
+`);
     mkdirSync(join(dir,"LICENSES"),{recursive:true});
     writeFileSync(join(dir,"LICENSES","LICENSE.txt"),readFileSync(join(root,"LICENSE")));
     writeFileSync(join(dir,"LICENSES","NOTICE.txt"),readFileSync(join(root,"NOTICE")));
@@ -79,7 +89,7 @@ try {
   await companionIcons(join(root,"assets/icon.svg"),resources,iconSet);
   for (const name of ["LICENSE", "NOTICE"]) writeFileSync(join(resources, `${name}.txt`), readFileSync(join(root, name)));
   run("/usr/bin/iconutil",["-c","icns",iconSet,"-o",join(resources,"Jase.icns")]);
-  writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>io.github.strnozz.jase-tunnel</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Collega i modelli locali ai siti che autorizzi.</string></dict></plist>`);
+  writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>io.github.strnozz.jase-tunnel</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Connect local models to websites you approve.</string></dict></plist>`);
   const signed = process.platform === "darwin";
   if (signed) {
     run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", app]);

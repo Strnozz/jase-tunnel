@@ -56,7 +56,7 @@ const (
 	idNotice    = 113 // Click on the tray balloon of a compatible page.
 	idRevoke    = 114
 	idSiteList  = 115 // Activity tab: the sites, each with its own console.
-	idRevokeOne = 116 // «Scollega sito» for the selected site.
+	idRevokeOne = 116 // «Disconnect website» for the selected site.
 )
 
 type winPoint struct{ X, Y int32 }
@@ -131,7 +131,7 @@ func (p *windowsPanel) child(class, text string, style uint32, id int) uintptr {
 	runtime.KeepAlive(c)
 	runtime.KeepAlive(t)
 	if h == 0 {
-		panic("Impossibile creare il controllo nativo " + class)
+		panic("Could not create the native control " + class)
 	}
 	winCall("SendMessageW", h, 0x30, p.font, 1)
 	if id != 0 {
@@ -147,7 +147,7 @@ func winMessageBox(owner uintptr, text string, flags uintptr) uintptr {
 	return r
 }
 func confirmDesktopReplacement() bool {
-	return winMessageBox(0, "Una versione precedente di Jase Tunnel è già aperta. Riavviarla per usare il nuovo pannello? Le richieste in corso verranno interrotte.", 0x24|0x100) == 6
+	return winMessageBox(0, "An earlier version of Jase Tunnel is already running. Restart it to use the new panel? Current requests will be interrupted.", 0x24|0x100) == 6
 }
 func desktopStartupError(message string) { winMessageBox(0, message, 0x10) }
 func showDesktopUI() {
@@ -238,8 +238,8 @@ func (p *windowsPanel) selectWeights() {
 	p.show()
 	menu := winCall("CreatePopupMenu")
 	defer winCall("DestroyMenu", menu)
-	winAppend(menu, 1, "File GGUF…")
-	winAppend(menu, 2, "Cartella modello…")
+	winAppend(menu, 1, "GGUF file…")
+	winAppend(menu, 2, "Model directory…")
 	choice := p.popup(menu)
 	if choice == 0 {
 		return
@@ -249,7 +249,7 @@ func (p *windowsPanel) selectWeights() {
 		path, err := pickModel(ctx, folder)
 		return path, folder, err
 	})
-	winText(p.notice, "Scegli i pesi nella finestra del computer. L’importazione proseguirà in background…")
+	winText(p.notice, "Choose the weights in the file chooser. The import will continue in the background…")
 	p.refresh()
 }
 func winListSelection(hwnd uintptr) int {
@@ -291,7 +291,7 @@ func (p *windowsPanel) command(id, notification int) {
 		index := winListSelection(p.controls[idModelList])
 		if p.imports == nil && index >= 0 && index < len(p.models) && p.models[index].ID != "" {
 			p.imports = p.a.importDetectedFromDesktop(p.models[index].ID)
-			winText(p.notice, "Aggiungo i pesi al motore locale…")
+			winText(p.notice, "Adding weights to the local engine…")
 			p.refresh()
 		}
 	case idDebug:
@@ -482,19 +482,19 @@ func (p *windowsPanel) refresh() {
 			p.site, p.activity, p.sites = approval.Origin, true, nil
 			p.layout()
 			p.refresh()
-			if len(approval.Models) > 0 && winMessageBox(p.hwnd, webConsentText(approval)+"\n\nPremi Sì, poi scegli il modello da autorizzare.", 0x4|0x20|0x100) == 6 {
+			if len(approval.Models) > 0 && winMessageBox(p.hwnd, webConsentText(approval)+"\n\nClick Yes, then choose the model to allow.", 0x4|0x20|0x100) == 6 {
 				menu := winCall("CreatePopupMenu")
 				for i, m := range approval.Models {
-					winAppend(menu, 1000+i, "Consenti con "+m.Name)
+					winAppend(menu, 1000+i, "Allow con "+m.Name)
 				}
-				winAppend(menu, 999, "Rifiuta")
+				winAppend(menu, 999, "Decline")
 				selected := p.popup(menu) - 1000
 				winCall("DestroyMenu", menu)
 				if selected >= 0 && selected < len(approval.Models) {
 					key = approval.Models[selected].Key
 				}
 			} else if len(approval.Models) == 0 {
-				winMessageBox(p.hwnd, webConsentText(approval)+"\n\nAvvia un modello compatibile in Ollama o LM Studio, poi riprova.", 0x40)
+				winMessageBox(p.hwnd, webConsentText(approval)+"\n\nStart a compatible model in Ollama or LM Studio, then try again.", 0x40)
 			}
 			go p.a.answerWebConsent(approval.ID, key)
 		}
@@ -580,7 +580,7 @@ func (a *application) runDesktopUI() {
 	p.instance, _, _ = kernel32.NewProc("GetModuleHandleW").Call(0)
 	p.icon = winCall("CreateIconFromResourceEx", uintptr(unsafe.Pointer(&windowsIconPNG[0])), uintptr(len(windowsIconPNG)), 1, 0x30000, 32, 32, 0)
 	if p.icon == 0 {
-		desktopStartupError("Impossibile caricare l’icona di Jase Tunnel.")
+		desktopStartupError("Could not load the Jase Tunnel icon.")
 		return
 	}
 	defer winCall("DestroyIcon", p.icon)
@@ -589,7 +589,7 @@ func (a *application) runDesktopUI() {
 	class.Size = uint32(unsafe.Sizeof(class))
 	class.Cursor = winCall("LoadCursorW", 0, 32512)
 	if winCall("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
-		desktopStartupError("Impossibile registrare la finestra di Jase Tunnel.")
+		desktopStartupError("Could not register the Jase Tunnel window.")
 		return
 	}
 	defer winCall("UnregisterClassW", uintptr(unsafe.Pointer(name)), p.instance)
@@ -597,7 +597,7 @@ func (a *application) runDesktopUI() {
 	p.hwnd = winCall("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), 0x00cf0000, 0x80000000, 0x80000000, uintptr(960*p.scale/96), uintptr(760*p.scale/96), 0, 0, p.instance, 0)
 	runtime.KeepAlive(title)
 	if p.hwnd == 0 {
-		desktopStartupError("Impossibile aprire Jase Tunnel.")
+		desktopStartupError("Could not open Jase Tunnel.")
 		return
 	}
 	winHandle.Store(p.hwnd)
@@ -607,25 +607,25 @@ func (a *application) runDesktopUI() {
 	runtime.KeepAlive(face)
 	defer gdi32.NewProc("DeleteObject").Call(p.font)
 	defer gdi32.NewProc("DeleteObject").Call(p.titleFont)
-	p.status = p.child("STATIC", "Jase Tunnel è in esecuzione", 0, 0)
+	p.status = p.child("STATIC", "Jase Tunnel is running", 0, 0)
 	winCall("SendMessageW", p.status, 0x30, p.titleFont, 1)
 	p.connection = p.child("STATIC", "", 0, 0)
 	p.stats = p.child("STATIC", "", 0, 0)
 	p.privacy = p.child("STATIC", "", 0, 0)
-	p.notice = p.child("STATIC", "Apri Ollama o il server locale di LM Studio. Puoi aggiungere file GGUF o cartelle di pesi compatibili.", 0, 0)
+	p.notice = p.child("STATIC", "Open Ollama or the LM Studio local server. You can add GGUF files or compatible weights directories.", 0, 0)
 	for _, button := range []struct {
 		id   int
 		text string
-	}{{idRevoke, "Scollega siti"}, {idRevokeOne, "Scollega sito"}, {idAdd, "Aggiungi pesi…"}, {idQuit, trayLabels[2]}, {idModels, "Modelli"}, {idActivity, "Attività"}, {idImport, "Aggiungi selezionati"}, {idClear, "Svuota registro"}} {
+	}{{idRevoke, "Disconnect websites"}, {idRevokeOne, "Disconnect website"}, {idAdd, "Add weights…"}, {idQuit, trayLabels[2]}, {idModels, "Models"}, {idActivity, "Activity"}, {idImport, "Add selected"}, {idClear, "Clear log"}} {
 		p.child("BUTTON", button.text, 0x10000, button.id)
 	}
-	p.child("BUTTON", "Log dettagliato, inclusi i testi", 0x10003, idDebug)
-	p.child("BUTTON", "Ragionamento del modello, se supportato", 0x10003, idThinking)
+	p.child("BUTTON", "Detailed log, including text", 0x10003, idDebug)
+	p.child("BUTTON", "Model reasoning, if supported", 0x10003, idThinking)
 	for _, id := range []int{idModelList, idEventList, idSiteList} {
 		p.child("LISTBOX", "", 0x10000|0x200000|0x100000|0x800000|1|0x100, id)
 		winCall("SendMessageW", p.controls[id], 0x194, 1600, 0)
 	}
-	p.detail = p.child("EDIT", "Seleziona un evento per leggerne i dettagli.", 0x10000|0x800000|0x200000|4|0x40|0x800, 0)
+	p.detail = p.child("EDIT", "Select an event to view its details.", 0x10000|0x800000|0x200000|4|0x40|0x800, 0)
 	p.child("COMBOBOX", "", 0x10000|0x200000|3, idFilter)
 	for _, f := range panelFilters {
 		t := wtext(f.Label)
@@ -643,7 +643,7 @@ func (a *application) runDesktopUI() {
 	runtime.KeepAlive(taskbar)
 	if !p.addTray() {
 		winCall("DestroyWindow", p.hwnd)
-		desktopStartupError("Windows non riesce a mostrare l’icona di Jase Tunnel nell’area di notifica. Riapri l’app quando la barra delle applicazioni è disponibile.")
+		desktopStartupError("Windows could not show the Jase Tunnel tray icon. Open the app again when the taskbar is available.")
 		return
 	}
 	p.layout()

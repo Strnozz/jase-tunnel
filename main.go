@@ -106,13 +106,13 @@ func main() {
 	if *state == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
-			failure("Cartella di configurazione dell’utente non disponibile.")
+			failure("The user configuration directory is not available.")
 			return
 		}
 		*state = filepath.Join(base, "Jase Tunnel")
 	}
 	if err := os.MkdirAll(*state, 0700); err != nil {
-		failure("Impossibile creare la cartella privata di Jase Tunnel: " + err.Error())
+		failure("Could not create the private Jase Tunnel directory: " + err.Error())
 		return
 	}
 	if !*foreground && !*background && !desktop {
@@ -148,7 +148,7 @@ func main() {
 	if !*foreground {
 		file, err := os.OpenFile(filepath.Join(*state, "jase-tunnel.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
-			failure("Impossibile aprire il registro di Jase Tunnel: " + err.Error())
+			failure("Could not open the Jase Tunnel log: " + err.Error())
 			return
 		}
 		defer file.Close()
@@ -164,7 +164,7 @@ func main() {
 	app.think.Store(*think)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	if *debug {
-		log.Print("Log completo attivo (--debug): prompt, thinking e risposte vengono scritti qui.")
+		log.Print("Full logging enabled (--debug): prompts, reasoning and responses are written here.")
 	}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
@@ -178,7 +178,7 @@ func main() {
 	} // An existing app keeps its connections.
 	if bytes, err := os.ReadFile(filepath.Join(*state, "connections.json")); err == nil {
 		if err := json.Unmarshal(bytes, &app.settings); err != nil {
-			failure("Le impostazioni private di Jase Tunnel non sono leggibili.")
+			failure("The private Jase Tunnel settings could not be read.")
 			return
 		}
 	}
@@ -211,7 +211,7 @@ func main() {
 		close(shutdownDone)
 	}()
 	log.Printf("Jase Tunnel %s ready on loopback port %d", version, *port)
-	app.record("app", "info", "Jase Tunnel avviato", "Le pagine compatibili si annunciano mentre navighi. Chiudi Jase Tunnel termina anche il servizio locale.")
+	app.record("app", "info", "Jase Tunnel started", "Compatible pages announce themselves as you browse. Quit Jase Tunnel also stops the local service.")
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Print("Local service stopped")
@@ -289,7 +289,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Host != fmt.Sprintf("127.0.0.1:%d", a.port) && r.Host != fmt.Sprintf("localhost:%d", a.port) {
-		fail(w, 403, "Indirizzo locale non valido.")
+		fail(w, 403, "Invalid local address.")
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/tunnel/v1/") {
@@ -301,7 +301,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Websites reach the tunnel exclusively through /tunnel/v1/.
 	origin := r.Header.Get("Origin")
 	if origin != "" && origin != fmt.Sprintf("http://127.0.0.1:%d", a.port) && origin != fmt.Sprintf("http://localhost:%d", a.port) {
-		fail(w, 403, "Richiesta locale non consentita.")
+		fail(w, 403, "Local request not allowed.")
 		return
 	}
 	if r.URL.Path == "/" && r.Method == "GET" {
@@ -321,13 +321,13 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// State changes need the page's Origin and JSON: a cross-site form can send neither.
 	if r.Method != "POST" || origin == "" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
-		fail(w, 403, "Richiesta locale non consentita.")
+		fail(w, 403, "Local request not allowed.")
 		return
 	}
 	switch r.URL.Path {
 	case "/v1/show-window":
 		if !a.nativeUI {
-			fail(w, 404, "Questa versione non ha un pannello nativo.")
+			fail(w, 404, "This version does not have a native panel.")
 			return
 		}
 		showDesktopUI()
@@ -337,11 +337,11 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Folder bool `json:"folder"`
 		}
 		if decode(w, r, &input, 1024) != nil {
-			fail(w, 400, "Richiesta non valida.")
+			fail(w, 400, "Invalid request.")
 			return
 		}
 		if !a.importMu.TryLock() {
-			fail(w, 409, "Una selezione è già aperta sul computer.")
+			fail(w, 409, "A file chooser is already open on this computer.")
 			return
 		}
 		defer a.importMu.Unlock()
@@ -355,7 +355,7 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, 200, map[string]bool{"ok": true})
 		go func() { time.Sleep(100 * time.Millisecond); a.cancel() }()
 	default:
-		fail(w, 404, "Risorsa non trovata.")
+		fail(w, 404, "Resource not found.")
 	}
 }
 func (a *application) saveLocked() error {

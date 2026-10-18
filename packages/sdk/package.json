@@ -1,8 +1,8 @@
 {
   "name": "jase-tunnel",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "Apache-2.0",
-  "description": "Collega la LLM locale dei visitatori al tuo servizio web tramite Jase Tunnel: un comando installa manifest, broker e pannello.",
+  "description": "Connect visitors’ local LLMs to your website with Jase Tunnel: install the manifest, broker and panel with one command. Optional MCP tools adapter.",
   "type": "commonjs",
   "engines": {
     "node": ">=22"

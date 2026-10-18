@@ -60,7 +60,7 @@ func TestWebEndpointsIgnoreUnknownFields(t *testing.T) {
 }
 
 // A page cannot keep reopening the consent dialog: one at a time per site, and a pause
-// after «Rifiuta».
+// after «Decline».
 func TestConsentDialogCannotBeReopenedInALoop(t *testing.T) {
 	a := newTestApp(t)
 	a.models = []model{{Key: "ollama:fixture", Name: "Fixture LLM", Engine: "ollama", Tools: true, ContextTokens: 8192}}
@@ -83,7 +83,7 @@ func TestConsentDialogCannotBeReopenedInALoop(t *testing.T) {
 	a.answerWebConsent(approval.ID, "")
 	_, third := discoverReceipt(t, a, origin, map[string]any{"protocol": webProtocol})
 	if code := webRequest(a, "pair", origin, third, ticket).Code; code != 429 {
-		t.Fatalf("site reopened the dialog right after «Rifiuta»: HTTP %d", code)
+		t.Fatalf("site reopened the dialog right after «Decline»: HTTP %d", code)
 	}
 	other := "https://tools.example.org"
 	_, receipt := discoverReceipt(t, a, other, map[string]any{"protocol": webProtocol})

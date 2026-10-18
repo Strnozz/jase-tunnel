@@ -63,7 +63,7 @@ func (l *activityLog) recordLocked(site, category, level, title, detail string) 
 	if category == "receive" {
 		l.received++
 	}
-	if category == "model" && title == "Modello avviato" {
+	if category == "model" && title == "Model started" {
 		l.modelTurns++
 	}
 	if level == "error" {

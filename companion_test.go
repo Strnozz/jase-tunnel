@@ -232,7 +232,7 @@ func TestLogMarksEachQueryAndShowsThinkingOnlyInDebug(t *testing.T) {
 		return output.String()
 	}
 	quiet := run(false)
-	for _, want := range []string{"===== Start query · richiesta 99999999 =====", "===== End reply · richiesta 99999999 · risposta inviata"} {
+	for _, want := range []string{"===== Start query · request 99999999 =====", "===== End reply · request 99999999 · response sent"} {
 		if !strings.Contains(quiet, want) {
 			t.Fatalf("missing %q in\n%s", want, quiet)
 		}
@@ -241,12 +241,12 @@ func TestLogMarksEachQueryAndShowsThinkingOnlyInDebug(t *testing.T) {
 		t.Fatal("conversation text logged without --debug")
 	}
 	full := run(true)
-	for _, want := range []string{"private fixture question", "--- thinking ---\nreasoning about the fixture", "--- risposta ---\nfinal fixture answer", "→ sito POST https://shop.example.com/api/jase-tunnel/v1/result", "5.0 token/s"} {
+	for _, want := range []string{"private fixture question", "--- thinking ---\nreasoning about the fixture", "--- response ---\nfinal fixture answer", "→ website POST https://shop.example.com/api/jase-tunnel/v1/result", "5.0 token/s"} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("missing %q in\n%s", want, full)
 		}
 	}
-	if strings.Index(full, "Start query") > strings.Index(full, "--- thinking ---") || strings.Index(full, "--- risposta ---") > strings.Index(full, "End reply") {
+	if strings.Index(full, "Start query") > strings.Index(full, "--- thinking ---") || strings.Index(full, "--- response ---") > strings.Index(full, "End reply") {
 		t.Fatal("markers do not enclose the query")
 	}
 }

@@ -48,7 +48,7 @@ func TestNativeDebugClearsConversationAndRejectsLateCallbacks(t *testing.T) {
 		t.Fatal("detailed native log missing")
 	}
 	a.setDetailedLogging(false)
-	a.recordDetailed("", "Risposta del modello", "private fixture text")
+	a.recordDetailed("", "Model response", "private fixture text")
 	raw, _ = json.Marshal(a.desktopState(0))
 	if strings.Contains(string(raw), "private fixture text") || a.debug.Load() {
 		t.Fatal("text remained after disabling logging")

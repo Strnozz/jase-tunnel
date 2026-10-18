@@ -405,8 +405,8 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 			EvalCount       int            `json:"eval_count"`
 			EvalDuration    int64          `json:"eval_duration"`
 		}
-		a.recordFor(site, "model", "info", "Modello avviato", name+" · Ollama")
-		a.debugFor(site, "LLM → Ollama %s · contesto %d · max %d token · thinking %s", name, t.ContextTokens, t.MaxTokens, onOff(thinks && a.think.Load(), thinks))
+		a.recordFor(site, "model", "info", "Model started", name+" · Ollama")
+		a.debugFor(site, "LLM → Ollama %s · context %d · max %d token · thinking %s", name, t.ContextTokens, t.MaxTokens, onOff(thinks && a.think.Load(), thinks))
 		started := time.Now()
 		if err := localJSON(ctx, ollamaURL, "/api/chat", request, &response, 600000); err != nil {
 			a.debugFor(site, "LLM ✗ %v", err)
@@ -417,7 +417,7 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		if response.EvalDuration > 0 {
 			speed = fmt.Sprintf(" · %.1f token/s", float64(response.EvalCount)/(float64(response.EvalDuration)/1e9))
 		}
-		a.debugFor(site, "LLM ← %s · prompt %d token · generati %d token%s", time.Since(started).Round(time.Millisecond), response.PromptEvalCount, response.EvalCount, speed)
+		a.debugFor(site, "LLM ← %s · prompt %d token · generated %d token%s", time.Since(started).Round(time.Millisecond), response.PromptEvalCount, response.EvalCount, speed)
 	} else if t.Model.Engine == "lmstudio" {
 		a.mu.RLock()
 		owned := a.studioLoaded[name]
@@ -446,14 +446,14 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 				Completion int `json:"completion_tokens"`
 			} `json:"usage"`
 		}
-		a.recordFor(site, "model", "info", "Modello avviato", name+" · LM Studio")
-		a.debugFor(site, "LLM → LM Studio %s · contesto %d · max %d token", name, t.ContextTokens, t.MaxTokens)
+		a.recordFor(site, "model", "info", "Model started", name+" · LM Studio")
+		a.debugFor(site, "LLM → LM Studio %s · context %d · max %d token", name, t.ContextTokens, t.MaxTokens)
 		started := time.Now()
 		if err := localJSON(ctx, studioURL, "/v1/chat/completions", request, &response, 600000); err != nil {
 			a.debugFor(site, "LLM ✗ %v", err)
 			return turn{}, err
 		}
-		a.debugFor(site, "LLM ← %s · prompt %d token · generati %d token", time.Since(started).Round(time.Millisecond), response.Usage.Prompt, response.Usage.Completion)
+		a.debugFor(site, "LLM ← %s · prompt %d token · generated %d token", time.Since(started).Round(time.Millisecond), response.Usage.Prompt, response.Usage.Completion)
 		if len(response.Choices) == 0 {
 			return turn{}, errors.New("empty model response")
 		}
@@ -522,35 +522,35 @@ func (a *application) importModel(ctx context.Context, folder bool) error {
 		return err
 	}
 	if file == "" {
-		return errors.New("Selezione annullata.")
+		return errors.New("Selection cancelled.")
 	}
 	return a.importModelAt(ctx, file, folder)
 }
 func (a *application) importModelAt(ctx context.Context, file string, folder bool) error {
 	info, err := os.Stat(file)
 	if err != nil {
-		return errors.New("Modello non accessibile.")
+		return errors.New("Model is inaccessible.")
 	}
 	if !folder && (info.IsDir() || !strings.EqualFold(filepath.Ext(file), ".gguf")) {
-		return errors.New("Scegli un file GGUF o una cartella Safetensors compatibile.")
+		return errors.New("Choose a GGUF file or a compatible Safetensors directory.")
 	}
 	if folder {
 		if !info.IsDir() {
-			return errors.New("Scegli una cartella di modello.")
+			return errors.New("Choose a model directory.")
 		}
 		if _, err = os.Stat(filepath.Join(file, "config.json")); err != nil {
-			return errors.New("La cartella deve contenere il modello completo e config.json.")
+			return errors.New("The directory must contain the complete model and config.json.")
 		}
 	}
 	engine := ollamaExecutable()
 	if engine == "" {
-		return errors.New("Per aggiungere questo file serve Ollama installato sul computer. I modelli di LM Studio vengono rilevati dal suo servizio locale.")
+		return errors.New("Ollama must be installed on this computer to add this file. LM Studio models are detected through its local service.")
 	}
 	modelfile := filepath.Join(a.stateDir, "import.Modelfile")
 	// Forward slashes work on Windows too and need no escaping inside the quoted value
 	// (strconv.Quote would double every backslash of C:\Users\…).
 	if err = os.WriteFile(modelfile, []byte("FROM "+strconv.Quote(filepath.ToSlash(file))+"\n"), 0600); err != nil {
-		return errors.New("Impossibile preparare l’importazione.")
+		return errors.New("Could not prepare the import.")
 	}
 	defer os.Remove(modelfile)
 	name := "jase-local-" + randomSecret()[:12]
@@ -558,7 +558,7 @@ func (a *application) importModelAt(ctx context.Context, file string, folder boo
 	hideChildConsole(command)
 	command.Env = append(os.Environ(), "OLLAMA_HOST=127.0.0.1:11434", "OLLAMA_NO_CLOUD=1")
 	if err = command.Run(); err != nil {
-		return errors.New("Importazione non riuscita. Verifica che Ollama sia aperto e che supporti questo modello.")
+		return errors.New("Import failed. Check that Ollama is running and supports this model.")
 	}
 	return nil
 }

@@ -15,10 +15,10 @@ func TestDesktopPanelKeepsSensitiveStatePrivateAndFiltersEvents(t *testing.T) {
 	a.models = []model{{Name: "Fixture", Engine: "ollama", Tools: true}}
 	a.files = []modelFile{{ID: "weights-id", Name: "weights.gguf", Path: "/private/weights/weights.gguf"}}
 	a.serverContact("https://shop.example.com")
-	a.record("server", "info", "Invio", "Metadata")
-	a.record("receive", "error", "Errore di ricezione", "Fixture")
+	a.record("server", "info", "Send", "Metadata")
+	a.record("receive", "error", "Receive error", "Fixture")
 	p := a.panelSnapshot(0, allSites)
-	if p.Title != "1 tunnel aperto" || !strings.Contains(p.Connection, "shop.example.com (Fixture)") || len(p.Models) != 2 || p.Models[1].ID != "weights-id" {
+	if p.Title != "1 open tunnel" || !strings.Contains(p.Connection, "shop.example.com (Fixture)") || len(p.Models) != 2 || p.Models[1].ID != "weights-id" {
 		t.Fatal("panel lost connection or import availability")
 	}
 	if len(a.panelSnapshot(1, allSites).Events) != 1 || len(a.panelSnapshot(2, allSites).Events) != 1 || len(a.panelSnapshot(4, allSites).Events) != 1 {
@@ -66,7 +66,7 @@ func TestDesktopImportSerializesSelectorsAndRechecksDetectedFiles(t *testing.T) 
 	result := a.importFromDesktop(func(context.Context) (string, bool, error) { called = true; return "", false, nil })
 	select {
 	case message := <-result:
-		if called || !strings.Contains(message, "già in corso") {
+		if called || !strings.Contains(message, "already in progress") {
 			t.Fatal("concurrent import opened another selector")
 		}
 	case <-time.After(time.Second):
@@ -75,7 +75,7 @@ func TestDesktopImportSerializesSelectorsAndRechecksDetectedFiles(t *testing.T) 
 	a.importMu.Unlock()
 	select {
 	case message := <-a.importDetectedFromDesktop("removed-id"):
-		if !strings.Contains(message, "non più disponibili") {
+		if !strings.Contains(message, "no longer available") {
 			t.Fatal("stale detected file was imported")
 		}
 	case <-time.After(time.Second):
@@ -84,7 +84,7 @@ func TestDesktopImportSerializesSelectorsAndRechecksDetectedFiles(t *testing.T) 
 }
 
 // Each site has its own console and the site list shows open tunnels first, with the
-// model and the expiry; «Scollega sito» closes only that site's tunnel.
+// model and the expiry; «Disconnect website» closes only that site's tunnel.
 func TestEachSiteHasItsConsoleAndItsOwnDisconnect(t *testing.T) {
 	a := newTestApp(t)
 	revoked := make(chan *http.Request, 1)
@@ -98,15 +98,15 @@ func TestEachSiteHasItsConsoleAndItsOwnDisconnect(t *testing.T) {
 	a.mu.Lock()
 	a.settings.Links = append(a.settings.Links, other)
 	a.mu.Unlock()
-	a.recordFor("https://news.example.net", "app", "info", "Pagina compatibile con Jase Tunnel", "")
-	a.recordFor(shop.Origin, "model", "info", "Richiesta ricevuta", "shop")
-	a.recordFor(other.Origin, "model", "info", "Richiesta ricevuta", "tools")
-	a.record("app", "info", "Jase Tunnel avviato", "")
+	a.recordFor("https://news.example.net", "app", "info", "Page supports Jase Tunnel", "")
+	a.recordFor(shop.Origin, "model", "info", "Request received", "shop")
+	a.recordFor(other.Origin, "model", "info", "Request received", "tools")
+	a.record("app", "info", "Jase Tunnel started", "")
 	p := a.panelSnapshot(0, allSites)
-	if p.Title != "2 tunnel aperti" || len(p.Sites) != 5 || !p.Sites[2].Open || !p.Sites[3].Open || p.Sites[4].Label != "news.example.net" || p.Sites[4].Open {
+	if p.Title != "2 open tunnels" || len(p.Sites) != 5 || !p.Sites[2].Open || !p.Sites[3].Open || p.Sites[4].Label != "news.example.net" || p.Sites[4].Open {
 		t.Fatalf("site list: %+v", p.Sites)
 	}
-	if !strings.HasPrefix(p.Sites[2].Status, "qwen · fino alle ") {
+	if !strings.HasPrefix(p.Sites[2].Status, "qwen · until ") {
 		t.Fatalf("open tunnel without model or expiry: %q", p.Sites[2].Status)
 	}
 	console := a.panelSnapshot(0, shop.Origin).Events
@@ -117,7 +117,7 @@ func TestEachSiteHasItsConsoleAndItsOwnDisconnect(t *testing.T) {
 	if a.webGrantActive(shop) || !a.webGrantActive(other) {
 		t.Fatal("disconnecting one site touched the other")
 	}
-	if a.panelSnapshot(0, allSites).Title != "1 tunnel aperto" {
+	if a.panelSnapshot(0, allSites).Title != "1 open tunnel" {
 		t.Fatal("closed tunnel still listed as open")
 	}
 	// Wait for the background validation before later tests change devBuild.

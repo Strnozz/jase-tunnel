@@ -68,9 +68,9 @@ export class TunnelReleaseCatalog {
 
   private empty(channel: TunnelReleaseChannel, unavailable = false): TunnelRelease {
     return { status: unavailable ? "unavailable" : "not-published", channel, repository: TUNNEL_REPOSITORY, releases: TUNNEL_RELEASES,
-      message: unavailable ? "Non riesco a verificare i download di Jase Tunnel su GitHub. Riprova tra poco."
-        : channel === "development" ? "La versione di Jase Tunnel per localhost deve ancora essere pubblicata su GitHub."
-        : "Gli eseguibili di Jase Tunnel devono ancora essere pubblicati su GitHub.",
+      message: unavailable ? "Could not verify Jase Tunnel downloads on GitHub. Try again shortly."
+        : channel === "development" ? "The Jase Tunnel version for localhost has not been published on GitHub yet."
+        : "Jase Tunnel executables have not been published on GitHub yet.",
       downloads: TUNNEL_DOWNLOADS.map(d => ({ ...d, available: false })) };
   }
 

@@ -106,7 +106,7 @@ func nativeImport(a *application, path string, folder bool) {
 	go func() {
 		var err error
 		if !a.importMu.TryLock() {
-			err = errors.New("Un’importazione è già in corso. Attendi che termini.")
+			err = errors.New("An import is already in progress. Wait for it to finish.")
 		} else {
 			err = a.importModelAt(a.ctx, path, folder)
 			a.importMu.Unlock()
@@ -114,12 +114,12 @@ func nativeImport(a *application, path string, folder bool) {
 				a.refreshModels()
 			}
 		}
-		message := "Pesi aggiunti. Il modello viene rilevato dal motore locale."
+		message := "Weights added. The local engine will detect the model."
 		level := "info"
 		if err != nil {
 			message, level = err.Error(), "error"
 		}
-		a.record("app", level, "Importazione dei pesi", message)
+		a.record("app", level, "Weight import", message)
 		result := C.CString(message)
 		defer C.free(unsafe.Pointer(result))
 		C.JaseImportFinished(result)
@@ -152,7 +152,7 @@ func jaseDesktopImportFound(id *C.char) {
 	if selected.Path != "" {
 		nativeImport(a, selected.Path, selected.Folder)
 	} else {
-		message := C.CString("Pesi non più disponibili. Selezionali con Aggiungi pesi.")
+		message := C.CString("These weights are no longer available. Select them with Add weights.")
 		C.JaseImportFinished(message)
 		C.free(unsafe.Pointer(message))
 	}

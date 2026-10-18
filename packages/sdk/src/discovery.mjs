@@ -12,16 +12,16 @@ export function discoverTools(project) {
   const root = resolve(project), found = [], warnings = [];
   let files = 0, bytes = 0, directories = 0;
   const walk = (directory,depth=0) => {
-    if (++directories>5000 || depth>24) throw new Error('Progetto troppo esteso per la scansione automatica. Usa tools add.');
+    if (++directories>5000 || depth>24) throw new Error('Project too large for automatic scanning. Use tools add.');
     for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a,b) => a.name.localeCompare(b.name))) {
       if (entry.isSymbolicLink() || entry.name.startsWith('.') || ignored.has(entry.name)) continue;
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) { walk(path,depth+1); continue; }
       if (!/\.(?:[cm]?[jt]s|[jt]sx)$/.test(entry.name) || /(?:\.d\.[cm]?ts|\.(?:test|spec)\.[jt]sx?)$/.test(entry.name) || entry.name.startsWith('jase-tunnel.')) continue;
-      if (++files > 5000) throw new Error('Scansione interrotta: più di 5000 file sorgente. Usa tools add sui moduli necessari.');
+      if (++files > 5000) throw new Error('Scan stopped: more than 5000 source files. Use tools add for the required modules.');
       const size=lstatSync(path).size;
-      if (size > 1024 * 1024) { warnings.push(`${relative(root,path)}: file oltre 1 MiB ignorato.`); continue; }
-      bytes+=size;if(bytes>32*1024*1024)throw new Error('Sorgenti oltre 32 MiB. Usa tools add sui moduli necessari.');
+      if (size > 1024 * 1024) { warnings.push(`${relative(root,path)}: file larger than 1 MiB skipped.`); continue; }
+      bytes+=size;if(bytes>32*1024*1024)throw new Error('Source files exceed 32 MiB. Use tools add for the required modules.');
       const source = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true, /x$/.test(extname(path)) ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
       const factories = new Set(), declarations = new Map(), exports = new Map();
       for (const statement of source.statements) {
@@ -61,8 +61,8 @@ export function discoverTools(project) {
             const nameNode = named && resolveNode(named.initializer);
             const fallback = pathParts.at(-1) ?? exported;
             const name = nameNode && ts.isStringLiteral(nameNode) ? nameNode.text : fallback.replace(/([a-z])([A-Z])/g,'$1_$2').toLowerCase().replace(/[^a-z0-9_]/g,'_');
-            if (!/^[a-z][a-z0-9_]{1,40}$/.test(name)) { warnings.push(`${relative(root,path)}#${exported}: nome strumento non riconoscibile.`); return; }
-            if (!description) { warnings.push(`${relative(root,path)}#${exported}: manca la descrizione.`); return; }
+            if (!/^[a-z][a-z0-9_]{1,40}$/.test(name)) { warnings.push(`${relative(root,path)}#${exported}: unrecognized tool name.`); return; }
+            if (!description) { warnings.push(`${relative(root,path)}#${exported}: missing description.`); return; }
             // Found is not enabled: the owner decides which tools visitors may call.
             found.push({ name, file: relative(root,path).split(sep).join('/'), export: exported, path: pathParts, kind, authorize: !!property(shape,'authorize'), enabled: false }); return;
           }
@@ -79,7 +79,7 @@ export function discoverTools(project) {
   walk(root);
   const names = new Map();
   for (const tool of found) {
-    if (names.has(tool.name)) throw new Error(`Nome duplicato ${tool.name}: ${names.get(tool.name)} e ${tool.file}. Rinomina uno strumento o aggiungilo con --name.`);
+    if (names.has(tool.name)) throw new Error(`Duplicate name ${tool.name}: ${names.get(tool.name)} and ${tool.file}. Rename a tool or add it with --name.`);
     names.set(tool.name,tool.file);
   }
   return { tools: found, warnings, files };

@@ -53,7 +53,7 @@ test('CLI init configures Next.js, is repeatable, adds and removes tools and pre
  assert.equal(run('tools','remove','catalog').status,0);assert.equal(run('tools','scan').status,0);assert.equal(JSON.parse(readFileSync(join(root,'jase-tunnel.tools.json'))).tools[0].enabled,false);
  assert.equal(run('tools','add','./src/tools/catalog.ts#catalog','--name','manual_catalog').status,0);
  const route=join(root,'src/app/api/jase-tunnel/v1/[...path]/route.ts');writeFileSync(route,'OWNER ROUTE');
- const failed=run('init','--skip-install');assert.equal(failed.status,1);assert.match(failed.stderr,/esiste già/);assert.equal(readFileSync(route,'utf8'),'OWNER ROUTE');
+ const failed=run('init','--skip-install');assert.equal(failed.status,1);assert.match(failed.stderr,/already exists/);assert.equal(readFileSync(route,'utf8'),'OWNER ROUTE');
 });
 
 test('schema and authorization checks run before an executor',async()=>{
@@ -119,7 +119,7 @@ test('CLI init wraps a node:http handler: manifest and panel are served, other r
  writeFileSync(join(root,'server.mjs'),`import http from 'node:http';\nconst server = http.createServer((req, res) => { res.end('app ' + req.url); });\nserver.listen(0, '127.0.0.1', () => console.log(server.address().port));\n`);
  const cli=resolve('bin/cli.mjs');
  const result=spawnSync(process.execPath,[cli,'init','--skip-install','--cwd',root],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);
- assert.match(result.stdout,/Aggiungi il pannello alle tue pagine/);
+ assert.match(result.stdout,/Add the panel to your pages/);
  assert.match(readFileSync(join(root,'server.mjs'),'utf8'),/http\.createServer\(withJaseTunnel\(\(req, res\) => \{ res\.end/);
  mkdirSync(join(root,'node_modules'));symlinkSync(resolve('.'),join(root,'node_modules','jase-tunnel'),'dir');
  const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root});

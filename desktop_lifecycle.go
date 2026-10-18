@@ -36,7 +36,7 @@ func (a *application) resolveExistingDesktop() net.Listener {
 		response.Body.Close()
 	}
 	if err != nil || state.Protocol != webProtocol && state.Protocol != previousLocalProtocol {
-		desktopStartupError("Il servizio locale è già occupato. Chiudi l’altra applicazione e riapri Jase Tunnel.")
+		desktopStartupError("The local service is already in use. Close the other application and open Jase Tunnel again.")
 		return nil
 	}
 	post := func(action string) bool {
@@ -58,7 +58,7 @@ func (a *application) resolveExistingDesktop() net.Listener {
 		return nil
 	}
 	if !post("quit") {
-		desktopStartupError("La versione precedente non si è chiusa. Chiudila e riapri Jase Tunnel.")
+		desktopStartupError("The previous version did not close. Quit it and open Jase Tunnel again.")
 		return nil
 	}
 	for i := 0; i < 30; i++ {
@@ -68,6 +68,6 @@ func (a *application) resolveExistingDesktop() net.Listener {
 			return listener
 		}
 	}
-	desktopStartupError("La versione precedente si sta ancora chiudendo. Riapri Jase Tunnel tra un momento.")
+	desktopStartupError("The previous version is still shutting down. Open Jase Tunnel again in a moment.")
 	return nil
 }

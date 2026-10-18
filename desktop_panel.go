@@ -8,13 +8,13 @@ import (
 )
 
 var panelFilters = []struct{ Label, Category string }{
-	{"Tutte le attività", "all"}, {"Chiamate al server", "server"},
-	{"Ricezioni dal server", "receive"}, {"Modello e interprete", "model"}, {"Errori", "error"},
+	{"All activity", "all"}, {"Server requests", "server"},
+	{"Server responses", "receive"}, {"Model and interpreter", "model"}, {"Errors", "error"},
 }
 
-var trayLabels = []string{"Apri Jase Tunnel", "Aggiungi pesi", "Chiudi Jase Tunnel"}
+var trayLabels = []string{"Open Jase Tunnel", "Add weights", "Quit Jase Tunnel"}
 
-const idleConnectionText = "Naviga normalmente: ti avviso quando una pagina accetta il tunnel"
+const idleConnectionText = "Browse as usual: you will be notified when a page supports the tunnel"
 
 type panelModel struct{ ID, Name, Engine, Status string }
 
@@ -40,8 +40,8 @@ type panelSnapshot struct {
 // journal never becomes an HTTP endpoint or a browser-accessible document.
 func (a *application) panelSnapshot(filter int, site string) panelSnapshot {
 	s := a.desktopState(0)
-	p := panelSnapshot{Title: "Jase Tunnel è in esecuzione", Connection: idleConnectionText, Debug: s["debug"].(bool), Thinking: s["thinking"].(bool), Generation: s["generation"].(uint64)}
-	p.Sites = []panelSite{{Key: allSites, Label: "Tutte le attività", Status: "App e siti insieme"}, {Key: "", Label: "Jase Tunnel", Status: "Avvio, modelli e impostazioni"}}
+	p := panelSnapshot{Title: "Jase Tunnel is running", Connection: idleConnectionText, Debug: s["debug"].(bool), Thinking: s["thinking"].(bool), Generation: s["generation"].(uint64)}
+	p.Sites = []panelSite{{Key: allSites, Label: "All activity", Status: "App and websites"}, {Key: "", Label: "Jase Tunnel", Status: "Startup, models and settings"}}
 	open, waiting := []string{}, 0
 	for _, x := range s["sites"].([]desktopSite) {
 		p.Sites = append(p.Sites, panelSite{Key: x.Origin, Label: x.Label, Status: x.Status, Open: x.State == "open"})
@@ -57,23 +57,23 @@ func (a *application) panelSnapshot(filter int, site string) panelSnapshot {
 		p.Connection = idleConnectionText
 	}
 	stats := s["statistics"].(map[string]uint64)
-	p.Statistics = fmt.Sprintf("↑ %d invii   ·   ↓ %d ricezioni   ·   ◇ %d turni del modello   ·   %d errori", stats["sent"], stats["received"], stats["modelTurns"], stats["errors"])
-	p.Privacy = "Registro privato sul computer · Ultimi 300 eventi. Chiudendo la finestra il tunnel resta nell’area di notifica."
+	p.Statistics = fmt.Sprintf("↑ %d sent   ·   ↓ %d received   ·   ◇ %d model turns   ·   %d errors", stats["sent"], stats["received"], stats["modelTurns"], stats["errors"])
+	p.Privacy = "Private local log · Last 300 events. Closing the window keeps the tunnel in the system tray."
 	if p.Debug {
-		p.Privacy = "Il registro può contenere prompt e risposte. Disattivando i testi si svuota la vista; eventuali file di log già scritti restano sul computer."
+		p.Privacy = "The log may contain prompts and responses. Turning off text logging clears the view; existing log files remain on this computer."
 	}
 	for _, m := range s["models"].([]model) {
-		engine, status := "Ollama", "Pronto"
+		engine, status := "Ollama", "Ready"
 		if m.Engine != "ollama" {
 			engine = "LM Studio"
 		}
 		if !m.Tools {
-			status = "Strumenti non disponibili"
+			status = "Tools unavailable"
 		}
 		p.Models = append(p.Models, panelModel{Name: m.Name, Engine: engine, Status: status})
 	}
 	for _, f := range s["files"].([]modelFile) {
-		p.Models = append(p.Models, panelModel{ID: f.ID, Name: f.Name, Engine: f.Format, Status: "Pesi da aggiungere"})
+		p.Models = append(p.Models, panelModel{ID: f.ID, Name: f.Name, Engine: f.Format, Status: "Weights to add"})
 	}
 	if filter < 0 || filter >= len(panelFilters) {
 		filter = 0
@@ -91,17 +91,17 @@ func (a *application) panelSnapshot(filter int, site string) panelSnapshot {
 }
 
 func openTunnelsText(open, waiting int) string {
-	text := "Jase Tunnel è in esecuzione"
+	text := "Jase Tunnel is running"
 	switch {
 	case open == 1:
-		text = "1 tunnel aperto"
+		text = "1 open tunnel"
 	case open > 1:
-		text = fmt.Sprintf("%d tunnel aperti", open)
+		text = fmt.Sprintf("%d open tunnels", open)
 	}
 	if waiting == 1 {
-		text += " · un sito chiede il tunnel"
+		text += " · a website is requesting a tunnel"
 	} else if waiting > 1 {
-		text += fmt.Sprintf(" · %d siti chiedono il tunnel", waiting)
+		text += fmt.Sprintf(" · %d websites are requesting a tunnel", waiting)
 	}
 	return text
 }
@@ -129,7 +129,7 @@ func eventSummary(e activityEvent) string {
 
 func eventDetail(events []activityEvent, index int) string {
 	if index < 0 || index >= len(events) {
-		return "Seleziona un evento per leggerne i dettagli."
+		return "Select an event to view its details."
 	}
 	e := events[index]
 	return e.Title + "\n\n" + e.Detail
@@ -167,24 +167,24 @@ func (a *application) importFromDesktop(selectPath func(context.Context) (string
 	go func() {
 		defer close(result)
 		if !a.importMu.TryLock() {
-			result <- "Un’importazione è già in corso. Attendi che termini."
+			result <- "An import is already in progress. Wait for it to finish."
 			return
 		}
 		defer a.importMu.Unlock()
 		path, folder, err := selectPath(a.ctx)
 		if err == nil && path == "" {
-			err = errors.New("Selezione annullata.")
+			err = errors.New("Selection cancelled.")
 		}
 		if err == nil {
 			err = a.importModelAt(a.ctx, path, folder)
 		}
-		message, level := "Pesi aggiunti. Il modello viene rilevato dal motore locale.", "info"
+		message, level := "Weights added. The local engine will detect the model.", "info"
 		if err == nil {
 			a.refreshModels()
 		} else {
 			message, level = err.Error(), "error"
 		}
-		a.record("app", level, "Importazione dei pesi", message)
+		a.record("app", level, "Weight import", message)
 		result <- message
 	}()
 	return result
@@ -199,6 +199,6 @@ func (a *application) importDetectedFromDesktop(id string) <-chan string {
 				return f.Path, f.Folder, nil
 			}
 		}
-		return "", false, errors.New("Pesi non più disponibili. Selezionali con Aggiungi pesi.")
+		return "", false, errors.New("These weights are no longer available. Select them with Add weights.")
 	})
 }

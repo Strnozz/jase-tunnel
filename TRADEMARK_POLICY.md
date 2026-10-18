@@ -1,44 +1,44 @@
-# Politica del marchio Jase Tunnel
+# Jase Tunnel trademark policy
 
-Jase Tunnel è il nome del progetto originale, pubblicato su [github.com/Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel). Il codice è distribuito con la [Apache License 2.0](LICENSE). Il nome «Jase Tunnel», il logo e gli altri elementi identificativi ufficiali sono gestiti separatamente: la licenza del codice non li concede (sezione 6 della Apache License).
+Jase Tunnel is the original project published at [github.com/Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel). Its code is distributed under the [Apache License 2.0](LICENSE). The Jase Tunnel name, logo and other official identifying marks are handled separately; the code license does not grant them (Apache License section 6).
 
-Questa politica serve a due scopi: permettere a chiunque di usare, modificare e ridistribuire il software, e far capire a chi installa una copia se si tratta della distribuzione ufficiale o di una versione derivata.
+This policy allows anyone to use, modify and redistribute the software while making clear whether an installed copy is the official distribution or a derivative.
 
-## Distribuzioni originali
+## Original distributions
 
-Il nome Jase Tunnel può essere usato per identificare e ridistribuire copie **non modificate** del software originale, purché non vengano presentate come release ufficiali pubblicate dal progetto quando non lo sono. Le release ufficiali sono soltanto quelle pubblicate nelle [Releases del repository](https://github.com/Strnozz/jase-tunnel/releases) e, per il modulo dei siti, il pacchetto npm `jase-tunnel` pubblicato dal progetto.
+The Jase Tunnel name may identify and accompany redistribution of **unmodified** copies of the original software, provided they are not presented as official project releases when they are not. Official releases are those published in the [repository’s Releases](https://github.com/Strnozz/jase-tunnel/releases) and, for the website SDK, the project’s `jase-tunnel` npm package.
 
-## Distribuzioni modificate
+## Modified distributions
 
-Chi realizza e distribuisce una versione modificata può usare gratuitamente la denominazione:
+Modified versions may use the following name without a fee:
 
 ```
-Jase Tunnel - Exp<NomeDistribuzione>
+Jase Tunnel - Exp<DistributionName>
 ```
 
-per esempio `Jase Tunnel - ExpAcme`, a queste condizioni:
+For example, `Jase Tunnel - ExpAcme`, under these conditions:
 
-- le modifiche rispetto al progetto originale sono dichiarate chiaramente, nel README o nelle note di rilascio;
-- la distribuzione non si presenta come versione ufficiale, approvata o sostenuta dal progetto;
-- il logo ufficiale non viene usato in modo da creare confusione sull’origine della distribuzione;
-- sono rispettati gli obblighi della Apache License 2.0, compresi gli avvisi del file `NOTICE` e l’indicazione dei file modificati.
+- Changes from the original project are clearly disclosed in the README or release notes.
+- The distribution does not claim to be official, approved or endorsed by the project.
+- The official logo is not used in a way that creates confusion about the distribution’s origin.
+- Apache License 2.0 obligations are met, including `NOTICE` attribution and identification of modified files.
 
-## Denominazioni indipendenti
+## Independent names
 
-Chiunque può distribuire versioni derivate con un nome completamente diverso, rispettando la licenza del codice e le norme sui marchi applicabili. In quel caso può dire in modo veritiero che il software deriva da Jase Tunnel.
+Derivative versions may use a completely different name, subject to the code license and applicable trademark law. They may truthfully state that the software derives from Jase Tunnel.
 
-## Compatibilità con il protocollo
+## Protocol compatibility
 
-Il protocollo `jase-tunnel-v1` è liberamente implementabile. Le implementazioni indipendenti, di app desktop o di moduli per i siti, possono dichiarare in modo veritiero di essere «compatibili con Jase Tunnel» o «compatibili con il protocollo jase-tunnel-v1», senza far intendere un’approvazione ufficiale.
+Anyone may implement `jase-tunnel-v1`. Independent desktop apps and website modules may truthfully describe themselves as “compatible with Jase Tunnel” or “compatible with the jase-tunnel-v1 protocol,” without implying official endorsement.
 
-## Usi sempre consentiti
+## Always permitted
 
-Senza alcuna autorizzazione è possibile usare il nome Jase Tunnel per riferirsi al progetto: in articoli, recensioni, documentazione, tutorial, confronti e discussioni, e per indicare che un sito supporta Jase Tunnel.
+No permission is required to refer to the Jase Tunnel project in articles, reviews, documentation, tutorials, comparisons or discussions, or to state that a website supports Jase Tunnel.
 
-## Indipendenza dalla licenza del software
+## Separate from the software license
 
-Questa politica regola esclusivamente l’uso dei segni identificativi del progetto. Non limita né modifica i diritti sul codice concessi dalla Apache License 2.0.
+This policy governs only the project’s identifying marks. It does not restrict or modify the code rights granted by the Apache License 2.0.
 
-## Domande
+## Questions
 
-Per richieste di uso diverse da quelle descritte qui, apri una [issue](https://github.com/Strnozz/jase-tunnel/issues) nel repository.
+For uses not described here, open a [repository issue](https://github.com/Strnozz/jase-tunnel/issues).

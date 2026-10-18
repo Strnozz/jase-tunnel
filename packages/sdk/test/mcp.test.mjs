@@ -92,7 +92,7 @@ async function fixture(t, { legacyOnly = false } = {}) {
 test('MCP requires a fixed safe endpoint, explicit tool selection and per-tool permissions before I/O', () => {
   const rule = { lookup: { public: true } };
   assert.throws(() => mcpTools({ url: 'https://mcp.example.com', tools: { lookup: {} } }), /authorize/);
-  assert.throws(() => mcpTools({ url: 'https://mcp.example.com', tools: {} }), /1 a 100/);
+  assert.throws(() => mcpTools({ url: 'https://mcp.example.com', tools: {} }), /1 to 100/);
   for (const url of ['http://mcp.example.com', 'file:///tmp/mcp', 'https://user:secret@mcp.example.com', 'https://mcp.example.com/#x']) {
     assert.throws(() => mcpTools({ url, tools: rule }), /HTTPS/);
   }
@@ -131,7 +131,7 @@ test('MCP permissions and argument validation precede execution; remote readOnly
   assert.equal(f.calls.length, 0);
   await tool.execute({ id: 1 }, context());
   assert.equal(f.calls.length, 1);
-  await assert.rejects(mcpTools({ url: f.url, tools: { missing_tool: { public: true } } })(context()), /non disponibile/);
+  await assert.rejects(mcpTools({ url: f.url, tools: { missing_tool: { public: true } } })(context()), /unavailable/);
 });
 
 test('the MCP adapter negotiates a real legacy 2025 HTTP endpoint', async t => {
@@ -149,7 +149,7 @@ test('MCP validates 2020-12 schemas with repeated IDs across visitors and reject
   await assert.rejects(adaptTool(alice[0]).execute({ values: [1] }, context()));
   await assert.rejects(adaptTool(bob[0]).execute({ values: ['one', 'two'] }, context()));
   assert.match((await adaptTool(alice[0]).execute({ values: ['one'] }, context())).content[0].text, /one/);
-  await assert.rejects(adaptTool(alice[1]).execute({}, context()), /testuali e JSON/);
+  await assert.rejects(adaptTool(alice[1]).execute({}, context()), /text and structured JSON/);
 });
 
 test('MCP requests respect cancellation, deadlines, response budgets and refuse redirects with credentials', async t => {
@@ -168,7 +168,7 @@ test('MCP requests respect cancellation, deadlines, response budgets and refuse 
   let followed = 0;
   const destination = await serve(t, () => { followed++; return Response.json({}); });
   const redirect = await serve(t, () => new Response(null, { status: 307, headers: { location: destination } }));
-  await assert.rejects(mcpTools({ url: redirect, headers: { Authorization: 'fixture-private-token' }, tools: { lookup: { public: true } } })(context()), /MCP: servizio/);
+  await assert.rejects(mcpTools({ url: redirect, headers: { Authorization: 'fixture-private-token' }, tools: { lookup: { public: true } } })(context()), /MCP: service/);
   assert.equal(followed, 0);
 });
 

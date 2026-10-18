@@ -1,5 +1,5 @@
-# Componenti incorporati
+# Bundled components
 
-La UI Linux incorpora [purego v0.11.1](https://github.com/ebitengine/purego/tree/v0.11.1), Copyright The Ebitengine Authors, distribuito con licenza Apache 2.0. La copia integrale della licenza è in `third_party/purego-LICENSE` e nei pacchetti Linux sotto `LICENSES/`.
+The Linux UI includes [purego v0.11.1](https://github.com/ebitengine/purego/tree/v0.11.1), Copyright The Ebitengine Authors, under the Apache License 2.0. The full license is in `third_party/purego-LICENSE` and in Linux packages under `LICENSES/`.
 
-GTK e le eventuali librerie AppIndicator appartengono al sistema dell’utente e sono caricate dinamicamente. `sharp` è usato soltanto dagli strumenti di compilazione delle icone e non viene incorporato negli eseguibili.
+GTK and optional AppIndicator libraries belong to the user’s system and are loaded dynamically. `sharp` is used only by the icon build tools and is not included in the executables.

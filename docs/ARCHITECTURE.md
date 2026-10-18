@@ -1,60 +1,60 @@
-# Architettura
+# Architecture
 
-Jase Tunnel è un programma autonomo: collega la LLM eseguita sul computer della persona ai siti che adottano il modulo `jase-tunnel`, dopo un consenso esplicito. Il programma non contiene domini predefiniti e non dipende da un servizio centrale. Questo repository distribuisce sia l’app desktop sia il modulo per i siti (`packages/sdk`).
+Jase Tunnel is a standalone app that connects a person’s local LLM to websites using the `jase-tunnel` SDK, after explicit consent. It has no predefined domains or central service dependency. This repository distributes both the desktop app and website SDK (`packages/sdk`).
 
-## Componenti
+## Components
 
-1. **Il sito** installa il modulo con `npx jase-tunnel init`. Il modulo pubblica il manifest `/.well-known/jase-tunnel.json`, monta il broker sotto `/api/jase-tunnel/v1/` e aggiunge il pannello alle pagine.
-2. **La pagina** si annuncia all’app su `http://127.0.0.1:11439/tunnel/v1/discover`, quando il browser lo consente senza mostrare richieste di permesso al visitatore. Altrimenti il contatto parte dal pulsante del pannello.
-3. **L’app** verifica il manifest sul dominio dichiarato dall’header `Origin`, solo verso IP pubblici e senza redirect. Se il sito è compatibile, mostra una notifica di sistema: «example.com accetta Jase Tunnel».
-4. **Il consenso:** «Collega» nella notifica (o il pulsante della pagina) fa proseguire la pagina. La pagina chiede un ticket al proprio server e lo consegna all’app. L’app mostra dominio, dati scambiati e selettore del modello. Solo dopo la conferma scambia il ticket con il broker del sito e ottiene una concessione valida al massimo trenta minuti, vincolata al modello scelto.
-5. **Il trasporto:** l’app riceve i turni dal broker con richieste ad attesa lunga, esegue l’inferenza su Ollama o LM Studio e restituisce testo e richieste di strumenti. Gli strumenti vengono eseguiti e autorizzati dal server del sito; l’app non esegue comandi ricevuti dal modello.
+1. **Website:** `npx jase-tunnel init` publishes `/.well-known/jase-tunnel.json`, mounts the broker at `/api/jase-tunnel/v1/` and adds the panel.
+2. **Page:** contacts `http://127.0.0.1:11439/tunnel/v1/discover` automatically only when the browser will not prompt. Otherwise contact starts through the panel button.
+3. **App:** verifies the manifest on the domain from the `Origin` header, using public IPs only and no redirects. A compatible site can trigger “example.com supports Jase Tunnel.”
+4. **Consent:** **Connect** in the notification or page resumes pairing. The page requests a ticket from its own server and delivers it to the app. The app shows the verified domain, data exchange and model selector. Only after confirmation does it exchange the ticket for a grant lasting at most thirty minutes, bound to the chosen model.
+5. **Transport:** the app long-polls the website’s broker, runs inference through Ollama or LM Studio, and returns text and tool requests. The website’s server authorizes and executes tools. The app does not execute commands received from the model.
 
-Il protocollo è `jase-tunnel-v1`, descritto in [WEB-STANDARD.md](WEB-STANDARD.md). Non serve un relay di terzi e il router non deve esporre porte in ingresso.
+The protocol is `jase-tunnel-v1`; see [WEB-STANDARD.md](WEB-STANDARD.md). No third-party relay or inbound router port is required.
 
-## Integrazione MCP facoltativa
+## Optional MCP integration
 
-L’SDK 0.5 espone `mcpTools` da `jase-tunnel/mcp`. Il server del sito interroga un endpoint MCP configurato dal proprietario con il client ufficiale opzionale, seleziona gli strumenti abilitati e inoltra le chiamate autorizzate. L’app desktop e il browser non ricevono le credenziali MCP e non cambiano protocollo. Il server MCP resta responsabile dei propri dati e permessi.
+SDK 0.5 exports `mcpTools` from `jase-tunnel/mcp`. The website’s server uses the optional official client to query a provider-configured endpoint, selects enabled tools and forwards authorized calls. Neither the desktop nor browser receives MCP credentials or changes protocol. The MCP server remains responsible for its own data and permissions.
 
-Le politiche `authorize`/`public` e `readOnly` sono dichiarazioni del proprietario: non vengono ricavate automaticamente dalle annotazioni del server remoto. Cataloghi e risultati sono limitati, le operazioni scadono e rispettano la cancellazione, i redirect sono rifiutati e i client vengono chiusi dopo ciascuna operazione per evitare sessioni condivise fra visitatori. Sono supportati strumenti Streamable HTTP con risultati testuali e JSON strutturati; stato implicito tra connessioni e funzionalità MCP ulteriori richiedono un’integrazione distinta. [Configurazione ed esempio](../packages/sdk/README.md#strumenti-da-un-server-mcp-sdk-05).
+The provider explicitly sets `authorize`/`public` and `readOnly`; remote annotations do not set those policies. Catalogs and results have size limits, operations expire and respect cancellation, redirects are rejected, and clients close after each operation to avoid sharing transport sessions between visitors. Streamable HTTP tools with text or structured JSON results are supported. Implicit state across connections and additional MCP features require separate integration. See [configuration and example](../packages/sdk/README.md#tools-from-an-mcp-server-sdk-05).
 
-## Interfacce desktop
+## Desktop interfaces
 
-macOS usa AppKit, Windows le API Win32 e Linux GTK 3, caricata da `purego`. Il motore e il pannello restano nello stesso processo. Tutti i pannelli leggono copie dello stato prive di token o percorsi dei pesi; il registro non ha API HTTP.
+macOS uses AppKit, Windows uses Win32, and Linux loads GTK 3 through `purego`. Engine and panel share a process. Panels read sanitized snapshots without credentials or weight paths; the activity log has no HTTP API.
 
-| Sistema | Notifica di sito compatibile | Clic su «Collega» |
+| System | Compatible-site notification | Connect action |
 | --- | --- | --- |
-| macOS | Notification Center (UserNotifications), dal bundle firmato dell’app | Pulsante «Collega» o clic sulla notifica |
-| Windows | Fumetto dell’icona nell’area di notifica (notifica di sistema su Windows 10/11) | Clic sulla notifica |
-| Linux | `notify-send` verso il servizio di notifica del desktop (pacchetto `libnotify-bin`) | «Collega», dove il desktop supporta le azioni |
+| macOS | Notification Center (UserNotifications), from the app bundle | Connect button or notification click |
+| Windows | Tray balloon / Windows 10–11 notification | Notification click |
+| Linux | `notify-send` through the desktop notification service (`libnotify-bin`) | Connect where notification actions are supported |
 
-Al massimo una notifica per sito al giorno, tre ogni dieci minuti e nessuna per un sito già collegato. Ogni annuncio resta anche nel registro del pannello, così l’informazione non si perde con le notifiche disattivate. Su macOS il Centro notifiche accetta solo un’app registrata in Applicazioni o `~/Applications`: avviata da una cartella temporanea, macOS rifiuta l’autorizzazione e l’annuncio resta solo nel pannello, come per un binario di sviluppo senza bundle.
+Limits: one notification per website per day, three every ten minutes, none for an already connected website. Announcements also remain in the panel log when notifications are disabled. macOS requires the app to be registered in Applications or `~/Applications`; a temporary app or development binary records announcements in the panel when Notification Center refuses permission.
 
-Il menu dell’icona contiene Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. **Scollega siti** revoca tutte le concessioni e interrompe le inferenze in corso. Chiudere la sola finestra lascia il servizio nell’area di notifica; uscire dall’app annulla motore e inferenze.
+The tray menu offers **Open Jase Tunnel**, **Add weights** and **Quit Jase Tunnel**. **Disconnect websites** revokes all grants and cancels inference. Closing the window keeps the tray service running; quitting stops the app engine and its inference requests.
 
-L’identità del pannello nello stato locale è `appkit-v1`, `win32-v1` o `gtk3-v1`: il riavvio dell’eseguibile riapre l’istanza con la stessa versione e modalità. Una versione differente, comprese le 0.2 e precedenti, chiede conferma prima del riavvio.
+The stored panel identity is `appkit-v1`, `win32-v1` or `gtk3-v1`. Relaunching the same version and mode opens the existing instance. A different version, including 0.2 and earlier, asks before restarting it.
 
-## Superfici del servizio locale
+## Local service surfaces
 
-| Endpoint | Chi lo usa | Uso |
+| Endpoint | Caller | Purpose |
 | --- | --- | --- |
-| `POST /tunnel/v1/discover` | Qualsiasi sito HTTPS pubblico | Annuncio della pagina; restituisce una ricevuta di cinque minuti |
-| `GET /tunnel/v1/discovery` | La pagina con la propria ricevuta | Stato della propria scoperta |
-| `POST /tunnel/v1/pair` | La pagina con la propria ricevuta | Consegna del ticket; apre il consenso nell’app |
-| `GET /` e `GET /v1/status` | Pagina di stato locale o processo locale | Versione e numero di modelli |
-| `POST /v1/show-window`, `/v1/add-model`, `/v1/quit` | Solo la pagina di stato locale | Pannello, selettore dei pesi, chiusura |
+| `POST /tunnel/v1/discover` | Eligible public HTTPS website | Announces the page; returns a five-minute receipt |
+| `GET /tunnel/v1/discovery` | Page with its own receipt | Reads its discovery state |
+| `POST /tunnel/v1/pair` | Page with its own receipt | Delivers a ticket and opens consent |
+| `GET /` and `GET /v1/status` | Local status page or process | Version and model count |
+| `POST /v1/show-window`, `/v1/add-model`, `/v1/quit` | Local status page only | Panel, file chooser and shutdown |
 
-Il servizio verifica l’header `Host` contro il DNS rebinding. Le API `/v1/` rifiutano qualsiasi `Origin` diverso dalla pagina di stato locale. Le API `/tunnel/v1/` non restituiscono inventario dei modelli, file, registro o altre connessioni.
+The service checks `Host` to resist DNS rebinding. `/v1/` rejects browser origins other than the local status page. `/tunnel/v1/` never returns model inventories, files, activity logs or other connections.
 
-## Motori locali e dati
+## Local engines and data
 
 - Ollama: `127.0.0.1:11434`.
-- LM Studio: `127.0.0.1:1234`, con API locale abilitata; l’eventuale `JASE_LMSTUDIO_TOKEN` rimane sul computer. Il tunnel tiene al massimo un’istanza propria per modello: se serve più contesto, sostituisce quella caricata in precedenza senza scaricare le istanze aperte dall’utente. Il contesto richiesto non può superare quello pubblicato per il modello.
-- I modelli cloud di Ollama sono esclusi. Non viene scelto un provider remoto se il modello locale non risponde.
-- La scansione è limitata ai percorsi predefiniti dei modelli e all’eventuale `OLLAMA_MODELS`, senza leggere le schede del browser o percorrere interi dischi.
-- Lo stato privato è nella sottocartella `Jase Tunnel` della cartella di configurazione dell’utente. `--state-dir` permette una posizione separata per le prove. All’avvio restano solo le concessioni non scadute del protocollo corrente.
-- I dettagli di prompt e risposte nel registro sono facoltativi. `--debug` può scriverli nei log locali.
+- LM Studio: `127.0.0.1:1234`, with its local API enabled. An optional `JASE_LMSTUDIO_TOKEN` stays on this computer. The tunnel maintains at most one of its own instances per model. Increasing context replaces that instance without unloading instances opened by the user, and never exceeds the model’s advertised context capacity.
+- Ollama cloud models are excluded. Failure of a local model never selects a remote provider.
+- Scanning is limited to standard model directories and optional `OLLAMA_MODELS`; the app reads neither browser tabs nor entire disks.
+- Private state lives under `Jase Tunnel` in the user configuration directory. `--state-dir` selects an isolated test location. Startup retains only unexpired grants for the current protocol.
+- Logging prompt and response text is optional. `--debug` may write it to local logs.
 
-## Limiti del browser
+## Browser limits
 
-Una normale app desktop non riceve gli URL visitati, e Jase Tunnel non legge le schede. La pagina deve contattare l’app. Chrome ed Edge chiedono al visitatore il permesso prima che una pagina pubblica contatti un servizio sul computer (Local Network Access), anche quando l’app non è installata. Per non mostrare quella richiesta a tutti i visitatori, il modulo si annuncia da solo solo in due casi: il permesso è già concesso, oppure il browser non prevede quel permesso e la persona si è già collegata su quel sito. Al primo contatto serve il pulsante del pannello; dopo, su quel sito le notifiche arrivano da sole.
+A normal desktop app cannot see visited URLs; Jase Tunnel does not read tabs. The page must contact it. Chrome and Edge can require Local Network Access permission before a public page contacts a local service, even when the app is absent. Automatic announcements happen only when permission is already granted, or the browser has no such permission and the visitor previously connected on that website. Otherwise the panel button starts the first contact. Subsequent visits to that website can notify automatically.

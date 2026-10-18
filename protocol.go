@@ -92,24 +92,24 @@ func (a *application) remote(ctx context.Context, c link, path string, input, ou
 	}
 	started := time.Now()
 	if path != "poll" {
-		a.debugFor(c.Origin, "→ sito POST %s%s", endpoint, sizeOf(input))
+		a.debugFor(c.Origin, "→ website POST %s%s", endpoint, sizeOf(input))
 	} else {
-		a.recordFor(c.Origin, "server", "info", "In attesa di richieste dal sito", c.Origin)
+		a.recordFor(c.Origin, "server", "info", "Waiting for website requests", c.Origin)
 	}
 	response, err := a.webHTTPClient().Do(req)
 	if err != nil {
 		if path != "poll" || ctx.Err() == nil {
-			a.debugFor(c.Origin, "✗ sito %s: %v", path, err)
+			a.debugFor(c.Origin, "✗ website %s: %v", path, err)
 		}
 		return err
 	}
 	defer response.Body.Close()
 	a.serverContact(c.Origin)
 	if path == "poll" && response.StatusCode == 200 {
-		a.recordFor(c.Origin, "receive", "info", "Ricezione dal sito", fmt.Sprintf("%s · HTTP 200 · %s", c.Origin, time.Since(started).Round(time.Millisecond)))
+		a.recordFor(c.Origin, "receive", "info", "Response from website", fmt.Sprintf("%s · HTTP 200 · %s", c.Origin, time.Since(started).Round(time.Millisecond)))
 	}
 	if path != "poll" || response.StatusCode != 200 {
-		a.debugFor(c.Origin, "← sito %s: HTTP %d in %s", path, response.StatusCode, time.Since(started).Round(time.Millisecond))
+		a.debugFor(c.Origin, "← website %s: HTTP %d in %s", path, response.StatusCode, time.Since(started).Round(time.Millisecond))
 	}
 	if response.StatusCode == 401 {
 		return unauthorized
@@ -132,15 +132,15 @@ func (a *application) isActive(ctx context.Context, c link, id string) (bool, er
 		return false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	a.debugFor(c.Origin, "→ sito GET %s%sactive", c.Origin, c.Broker)
+	a.debugFor(c.Origin, "→ website GET %s%sactive", c.Origin, c.Broker)
 	response, err := a.webHTTPClient().Do(req)
 	if err != nil {
-		a.debugFor(c.Origin, "✗ sito: controllo della richiesta: %v", err)
+		a.debugFor(c.Origin, "✗ website: request validation: %v", err)
 		return false, err
 	}
 	defer response.Body.Close()
 	a.serverContact(c.Origin)
-	a.debugFor(c.Origin, "← sito active: HTTP %d", response.StatusCode)
+	a.debugFor(c.Origin, "← website active: HTTP %d", response.StatusCode)
 	if response.StatusCode == 401 {
 		return false, unauthorized
 	}
@@ -166,7 +166,7 @@ func (a *application) startLink(c link) {
 		for a.ctx.Err() == nil {
 			if !a.webGrantActive(c) {
 				if c.ExpiresAt <= time.Now().UnixMilli() {
-					a.recordFor(c.Origin, "app", "info", "Tunnel scaduto", "Il collegamento dura al massimo 30 minuti: il sito può chiederne uno nuovo.")
+					a.recordFor(c.Origin, "app", "info", "Tunnel expired", "Connections last up to 30 minutes; the website can request a new one.")
 				}
 				a.forget(c.Token)
 				return
@@ -177,12 +177,12 @@ func (a *application) startLink(c link) {
 			err := a.remote(a.ctx, c, "poll", nil, &response)
 			if errors.Is(err, unauthorized) {
 				if a.webGrantActive(c) {
-					a.recordFor(c.Origin, "app", "info", "Tunnel chiuso dal sito", "Il sito ha revocato il collegamento.")
+					a.recordFor(c.Origin, "app", "info", "Tunnel closed by website", "The website revoked the connection.")
 				}
 				a.forget(c.Token)
 				return
 			}
-			// «Scollega siti» may have removed the grant while the long poll was waiting.
+			// «Disconnect websites» may have removed the grant while the long poll was waiting.
 			if !a.webGrantActive(c) {
 				return
 			}
@@ -214,19 +214,19 @@ func (a *application) forget(token string) {
 }
 func (a *application) handleTask(c link, t task) {
 	if !a.webGrantActive(c) || !validWebTask(c, t) {
-		a.recordFor(c.Origin, "model", "error", "Turno rifiutato", "Il server ha richiesto un modello o limiti diversi dal consenso.")
+		a.recordFor(c.Origin, "model", "error", "Turn rejected", "The server requested a model or limits outside the approved consent.")
 		return
 	}
-	started, label, outcome := time.Now(), queryLabel(t), "annullata"
+	started, label, outcome := time.Now(), queryLabel(t), "cancelled"
 	log.Printf("===== Start query · %s =====", label)
 	a.logTask(c.Origin, t)
 	defer func() {
 		log.Printf("===== End reply · %s · %s · %.1fs =====", label, outcome, time.Since(started).Seconds())
 		level := "info"
-		if strings.Contains(outcome, "errore") || strings.Contains(outcome, "NON consegnata") {
+		if strings.Contains(outcome, "error") || strings.Contains(outcome, "NOT delivered") {
 			level = "error"
 		}
-		a.recordFor(c.Origin, "model", level, "Richiesta terminata", fmt.Sprintf("%s · %s · %.1fs", label, outcome, time.Since(started).Seconds()))
+		a.recordFor(c.Origin, "model", level, "Request finished", fmt.Sprintf("%s · %s · %.1fs", label, outcome, time.Since(started).Seconds()))
 	}()
 	deadline := time.UnixMilli(t.ExpiresAt)
 	if deadline.After(time.Now().Add(10 * time.Minute)) {
@@ -288,14 +288,14 @@ func (a *application) handleTask(c link, t task) {
 		return
 	}
 	if err != nil {
-		outcome = "errore del modello: " + err.Error()
+		outcome = "model error: " + err.Error()
 		result = map[string]string{"error": "local_model_error"}
 	} else {
-		outcome = "risposta inviata"
+		outcome = "response sent"
 		result = answer
 	}
 	if err := a.remote(ctx, c, "result", map[string]any{"id": t.ID, "result": result}, nil); err != nil {
-		outcome = "risposta NON consegnata al sito: " + err.Error()
+		outcome = "response NOT delivered to website: " + err.Error()
 	}
 }
 func (a *application) watchModels() {
