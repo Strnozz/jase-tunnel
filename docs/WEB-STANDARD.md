@@ -298,6 +298,18 @@ Local Network Access permission is additional to CORS and native app consent. `A
 
 A custom URL scheme could provide an explicit alternative for opening the app, but requires package registration and verified pairing. It is not implemented and would not provide silent notifications for all browsing.
 
+### Explicit connection window (desktop 0.3.4 / SDK 0.5.2)
+
+Safari blocks the direct HTTPS-to-HTTP loopback fetch. The SDK therefore opens a **top-level** local window at `http://127.0.0.1:11439/tunnel/connect` synchronously within the Connect user action. It MUST NOT open this window from automatic announcements. A random 256-bit channel and expected opener origin travel in the URL fragment; tickets, receipts and credentials MUST NOT appear in any URL.
+
+Both sides MUST validate the exact `MessageEvent.source`, exact sender origin, channel and message type. Every `postMessage` MUST specify the exact destination origin. The local window binds only to its opener and the origin specified for that handshake. No iframe embedding is allowed. Its nonce CSP permits only its own script/style and same-origin requests; external resources, forms and base URLs are forbidden.
+
+The local window uses same-origin JSON POSTs to `/v1/browser-bridge`. The relay MUST require the exact loopback Host and a single local browser Origin, enforce an 8 KiB body limit, and allow only `discover`, `discovery` and `pair`. It MUST reject external requests and all management operations. The eligible website origin is the origin authenticated by the local window's message handler, then checked again by the app's origin and public-network rules. The same origin-bound receipts, ticket exchange, quotas and local model consent MUST apply. No inventory or broker credential is returned through the relay.
+
+The SDK closes its temporary window and removes listeners/timers on completion, error, navigation or timeout. A blocked or prematurely closed window requires a new click. An older app needs updating. A provider's opener-isolation policy can sever the channel; do not weaken or rewrite that policy automatically. Safari automatic announcements remain unavailable; already active broker sessions continue normally.
+
+Verified on Safari **26.6.2** on macOS: direct production HTTPS fetch blocked; isolated corrected client on the same production HTTPS origin opens the local window, verifies the domain and reaches native-consent state. Native consent and cross-origin isolation boundaries also have automated regression tests. No model inference was authorized during this browser check.
+
 Browser references consulted on October 17, 2026:
 
 - [Chrome: Local Network Access](https://developer.chrome.com/blog/local-network-access?hl=en).

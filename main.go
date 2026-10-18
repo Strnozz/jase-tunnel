@@ -292,6 +292,10 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 403, "Invalid local address.")
 		return
 	}
+	if r.URL.Path == "/tunnel/connect" && r.Method == "GET" {
+		a.serveBrowserWindow(w, r)
+		return
+	}
 	if strings.HasPrefix(r.URL.Path, "/tunnel/v1/") {
 		a.serveWeb(w, r)
 		return
@@ -325,6 +329,8 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
+	case "/v1/browser-bridge":
+		a.serveBrowserBridge(w, r)
 	case "/v1/show-window":
 		if !a.nativeUI {
 			fail(w, 404, "This version does not have a native panel.")

@@ -32,6 +32,7 @@ await desktopIcon(join(root,"assets/icon.svg"),join(root,"assets/desktop-icon.pn
 const status = ownRepository ? git(["status", "--porcelain"]) : undefined;
 const dirty = revision === "local" || status?.status !== 0 || !!status?.stdout.trim();
 const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/icon.svg", "assets/desktop-icon.png", "scripts/companion-icons.mjs", "scripts/build.mjs", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json"].map(name => join(root, name))];
+sources.push(join(root, "web_bridge.html"));
 const sourceHash = createHash("sha256");
 for (const path of sources.sort()) sourceHash.update(readFileSync(path));
 const source = sourceHash.digest("hex").slice(0, 12);
