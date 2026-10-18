@@ -2,6 +2,11 @@ name: Check and package Jase Tunnel SDK
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing SDK tag to publish or retry (for example sdk-v0.3.0); leave empty to run checks only
+        required: false
+        type: string
   push:
     branches: [main]
     tags: ['sdk-v*']
@@ -17,6 +22,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -25,7 +32,7 @@ jobs:
       - run: npm ci --ignore-scripts --prefix packages/sdk
       - run: npm --prefix packages/sdk test
   release:
-    if: startsWith(github.ref, 'refs/tags/sdk-v')
+    if: startsWith(github.ref, 'refs/tags/sdk-v') || inputs.release_tag != ''
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -34,6 +41,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -41,7 +50,7 @@ jobs:
       - run: npm ci --ignore-scripts --prefix packages/sdk
       - name: Verify tag and create the npm package
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           node --input-type=module -e "import fs from 'node:fs'; const version=JSON.parse(fs.readFileSync('packages/sdk/package.json')).version; if(process.env.RELEASE_TAG!=='sdk-v'+version)throw new Error('SDK tag/version mismatch');"
           mkdir -p .deploy-check
@@ -52,11 +61,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           RELEASE_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then echo 'Release already exists; use a new version.' >&2; exit 1; fi
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            mkdir -p .deploy-check/published
+            gh release download "$RELEASE_TAG" --pattern 'jase-tunnel-*.tgz' --pattern SHA256SUMS --dir .deploy-check/published
+            cmp .deploy-check/jase-tunnel-*.tgz .deploy-check/published/jase-tunnel-*.tgz
+            cmp .deploy-check/SHA256SUMS .deploy-check/published/SHA256SUMS
+            echo 'Existing SDK release is identical; retrying npm publication without replacing its files.'
+            exit 0
+          fi
+          export RELEASE_COMMIT=$(git rev-parse HEAD)
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           fs.writeFileSync('.deploy-check/sdk-notes.md', `Jase Tunnel SDK\n\nCommit: ${process.env.RELEASE_COMMIT}\nBuild: ${process.env.RELEASE_RUN}\n\nPacchetto npm: npx jase-tunnel init. Richiede Jase Tunnel 0.3.0 o successivo sul computer dei visitatori.\n`);
@@ -64,10 +80,10 @@ jobs:
           gh release create "$RELEASE_TAG" .deploy-check/jase-tunnel-*.tgz .deploy-check/SHA256SUMS --verify-tag --target "$RELEASE_COMMIT" --draft --title "Jase Tunnel SDK $RELEASE_TAG" --notes-file .deploy-check/sdk-notes.md
           gh release edit "$RELEASE_TAG" --draft=false --latest=false
       # `npx jase-tunnel init` needs the package on the npm registry. Publishing uses the
-      # repository secret NPM_TOKEN (an npm automation token); without it this step is skipped.
+      # repository secret NPM_TOKEN (a granular token with package write access and Bypass 2FA).
       - name: Publish to the npm registry
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then echo 'NPM_TOKEN is not configured: npm publication skipped.'; exit 0; fi
+          if [ -z "$NODE_AUTH_TOKEN" ]; then echo 'NPM_TOKEN is not configured: npm publication cannot proceed.' >&2; exit 1; fi
           npm publish .deploy-check/jase-tunnel-*.tgz --access public --provenance
