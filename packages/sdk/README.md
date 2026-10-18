@@ -1,35 +1,42 @@
-# Jase Tunnel SDK
+# jase-tunnel
 
-Un modulo server e browser indipendente dal sito Jase. Usa la LLM sul computer della persona; strumenti, dati e autorizzazioni rimangono sul server del progetto. Nessuna API di inferenza esterna, account Tunnel o relay obbligatorio.
+Il modulo per i servizi web che vogliono usare la LLM locale dei propri visitatori tramite l’app [Jase Tunnel](https://github.com/Strnozz/jase-tunnel). Strumenti, dati e autorizzazioni restano sul server del servizio; l’inferenza avviene sul computer del visitatore, dopo il suo consenso. Nessuna API di inferenza esterna, account o relay.
 
 ## Un comando nel progetto
 
-La distribuzione prevista è un pacchetto npm standard nelle release pubbliche di questo repository:
-
 ```sh
-npx --yes https://github.com/Strnozz/jase-tunnel/releases/download/sdk-v0.2.0/jase-tunnel-sdk-0.2.0.tgz init
+npx jase-tunnel init
 ```
 
-Il comando sarà scaricabile dopo la pubblicazione del tag `sdk-v0.2.0`. Non richiede un account npm per l'integratore. Un'eventuale pubblicazione futura sul registro npm permetterà anche `npx @jase-tunnel/sdk init`.
+Node.js 22 o successivo. `init`:
 
-Prima della pubblicazione si può usare il pacchetto locale:
+1. installa la dipendenza `jase-tunnel` con versione fissata (gli script di installazione npm non vengono eseguiti);
+2. rileva gli strumenti IA esportati dal progetto e scrive `jase-tunnel.config` e il registro `jase-tunnel.tools.json`;
+3. collega manifest e broker al server;
+4. aggiunge il pannello alle pagine.
 
-```sh
-npx --yes --package /percorso/jase-tunnel-sdk-0.2.0.tgz jase-tunnel init --package /percorso/jase-tunnel-sdk-0.2.0.tgz
+| Progetto | Server | Pannello |
+| --- | --- | --- |
+| **Next.js App Router** | Route `/.well-known/jase-tunnel.json` e `/api/jase-tunnel/v1/[...path]` | `<JaseTunnel />` nel layout |
+| **Express** | Una riga `app.use(...)` subito dopo `express()`, prima degli altri middleware | Script nei file HTML e nei template |
+| **`node:http`** | Il gestore passato a `createServer` viene avvolto | Script nei file HTML e nei template |
+
+Il server carica il modulo con `import()` dinamico, quindi la stessa riga funziona in CommonJS e in ESM. I file HTML e i template riconosciuti sono `.html`, `.ejs`, `.hbs`, `.njk`, `.liquid` e `.mustache` con `</body>`; se non ce ne sono, `init` stampa il tag da aggiungere:
+
+```html
+<script type="module" src="/api/jase-tunnel/v1/client/widget.mjs"></script>
 ```
 
-Node.js 22 o successivo. Nei progetti **Next.js App Router** `init` installa la dipendenza con versione fissata, genera il manifest pubblico e il broker, registra i tool riconosciuti e aggiunge il pannello React al layout. Non modifica il chatbot preesistente: il pannello offre una conversazione che usa gli strumenti del progetto attraverso il modello personale. I file esistenti in conflitto vengono conservati e segnalati prima di scrivere. Layout e registri modificati hanno una copia in `.jase-tunnel/backups/`; questa cartella è esclusa da Git.
+I file esistenti in conflitto vengono conservati e segnalati prima di scrivere. Server, layout, pagine e registri modificati hanno una copia in `.jase-tunnel/backups/`, esclusa da Git. Ripetere `init` non duplica le modifiche. `--dry-run` mostra i file previsti senza scrivere o installare. `--cwd <cartella>` seleziona il progetto. `--package <pacchetto o tarball>` installa un’altra versione o un pacchetto locale.
 
-`--dry-run` mostra i file previsti senza scrivere o installare. `--cwd <cartella>` seleziona il progetto. `--package <tarball>` permette un pacchetto locale o un'altra distribuzione approvata. L'installazione npm non esegue script di lifecycle.
-
-Per altri server JavaScript viene generata la configurazione; il collegamento al router del framework resta esplicito. Il nucleo accetta le API Fetch standard:
+Per i progetti TypeScript con Express o `node:http` la configurazione è `jase-tunnel.config.ts`, importata senza estensione: funziona con `tsx`, `ts-node` o una compilazione CommonJS. Con una compilazione ESM in `dist/` va corretto il percorso dell’import. Per altri server il nucleo accetta le API Fetch standard:
 
 ```ts
 import site from './jase-tunnel.config';
-const response = await site.handle(request);
+const response = await site.handle(request); // inoltra il manifest e /api/jase-tunnel/v1/*
 ```
 
-Inoltrare `/.well-known/jase-tunnel.json` e `/api/jase-tunnel/v1/*`; nel frontend montare `JaseTunnel` da `@jase-tunnel/sdk/react`, oppure usare `TunnelClient` da `@jase-tunnel/sdk/browser`. L'installazione automatica completa non è dichiarata per Python, PHP, Ruby, Next Pages Router o router server sconosciuti.
+Per Express o `node:http` collegati a mano: `nodeMiddleware(site)` e `withJaseTunnel(site, handler)` da `jase-tunnel/node`. Nel frontend: `JaseTunnel` da `jase-tunnel/react`, `mountJaseTunnel` da `jase-tunnel/widget` oppure `TunnelClient` da `jase-tunnel/browser`. L’installazione automatica non è dichiarata per Python, PHP, Ruby, Next Pages Router o router server sconosciuti.
 
 ## Autodetect degli strumenti
 
@@ -56,7 +63,7 @@ npx jase-tunnel tools add ./src/catalog.ts#lookup --name lookup_product --schema
 Per dichiarare un tool direttamente:
 
 ```ts
-import { defineTool } from '@jase-tunnel/sdk/server';
+import { defineTool } from 'jase-tunnel/server';
 export const lookupProduct = defineTool({
   name: 'lookup_product',
   description: 'Cerca un prodotto nel catalogo',
@@ -69,20 +76,18 @@ export const lookupProduct = defineTool({
 });
 ```
 
-Lo schema viene validato prima dell'esecutore. `request` contiene la richiesta e i cookie del servizio, `signal` la cancellazione, `sessionId` un identificatore opaco; il modulo non fornisce credenziali Jase. I permessi applicativi non si possono dedurre dai sorgenti: gli esecutori devono conservare le verifiche del progetto. Un hook `authorize(request)` nella configurazione può limitare l'intero pannello; un tool può avere `authorize(context, args)`.
+Lo schema viene validato prima dell'esecutore. `request` contiene la richiesta e i cookie del servizio, `signal` la cancellazione, `sessionId` un identificatore opaco; il modulo non aggiunge credenziali proprie. I permessi applicativi non si possono dedurre dai sorgenti: gli esecutori devono conservare le verifiche del progetto. Un hook `authorize(request)` nella configurazione può limitare l'intero pannello; un tool può avere `authorize(context, args)`.
 
 Uno strumento è eseguito senza conferma soltanto se dichiara `readOnly: true`, `riskLevel: 'read'` o `annotations.readOnlyHint: true` (oppure aggiunta esplicita con `--read-only`). Gli altri richiedono una conferma nel pannello, vincolata a browser, chiamate e scadenza. L'inventario rilevato non comporta l'esecuzione di alcun tool. `readOnly` non sostituisce l'autorizzazione dei dati privati.
 
 ## App desktop e collegamento
 
-Serve **Jase Tunnel 0.2.0 o successivo**. La release 0.1.0 accetta soltanto Jase e non viene offerta da questo SDK a un altro servizio. Il sito espone `/.well-known/jase-tunnel.json`; il browser contatta il loopback, il tunnel verifica dominio e manifest e l'utente conferma il dominio e il modello nel pannello nativo. Il browser può richiedere il permesso di accesso locale. Prima del consenso il sito non riceve l'inventario dei modelli.
+Serve **Jase Tunnel 0.3.0 o successivo** sul computer del visitatore; il pannello propone il download dalle release di GitHub. Il visitatore non deve fare altro: quando il browser lo consente senza mostrare richieste di permesso, la pagina si annuncia all’app, che verifica dominio e manifest e mostra una notifica. «Collega» nella notifica fa proseguire la pagina fino al consenso nell’app, dove il visitatore sceglie il modello. Prima del consenso il sito non riceve l’inventario dei modelli.
 
-Il collegamento dura al massimo trenta minuti, resta vincolato a quel modello e può essere revocato dal sito o dal pulsante **Scollega siti** nell'app. La revoca nativa interrompe anche le inferenze attive. Il protocollo legacy di Jase resta separato.
+Chrome ed Edge chiedono il permesso di accesso locale prima che una pagina contatti l’app. Il pannello non si annuncia da solo se questo farebbe comparire la richiesta: al primo contatto il visitatore usa il pulsante «Collega il mio modello», poi su quel sito le notifiche arrivano da sole.
 
-In produzione usare HTTPS e, se il reverse proxy cambia l'autorità della Request, configurare `JASE_TUNNEL_ORIGIN=https://il-tuo-dominio`. Per localhost usare la build desktop di sviluppo (`npm run build:dev`): una release non accetta origini loopback. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439`; il modulo non allenta automaticamente le policy del progetto.
+Il collegamento dura al massimo trenta minuti, resta vincolato a quel modello e può essere revocato dal pannello del sito o dal pulsante **Scollega siti** nell’app. La revoca interrompe anche le inferenze attive.
 
-Il primo adattatore del broker usa memoria del processo: un'istanza Node persistente e affinità delle richieste sono necessarie. Non è un broker distribuito per funzioni serverless o più worker; un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming, MCP remoto e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.
+In produzione usare HTTPS e, se il reverse proxy cambia l’autorità della Request, configurare `JASE_TUNNEL_ORIGIN=https://il-tuo-dominio`. Per un servizio in `localhost` serve una build di sviluppo dell’app (`npm run build:dev` nel repository): una release accetta solo siti HTTPS pubblici. Se presente, la CSP del sito deve permettere `connect-src http://127.0.0.1:11439` e lo script del pannello dal proprio dominio; il modulo non allenta automaticamente le policy del progetto.
 
-## Integrazione in Jase
-
-Il sottopercorso `legacy` contiene il broker estratto con i contratti precedenti; `protocol`, `platforms` e `releases` espongono protocollo browser, rilevamento del sistema e catalogo GitHub. Jase installa questo stesso pacchetto mantenendo gli adattatori del proprio agente, i controlli sulle conversazioni e il registro strumenti con contesto dinamico.
+Il broker usa la memoria del processo: servono un’istanza Node persistente e affinità delle richieste. Non è un broker distribuito per funzioni serverless o più worker; un riavvio richiede un nuovo collegamento. Le conversazioni del pannello non vengono salvate su disco. Streaming, MCP remoto e integrazione automatica in chatbot arbitrari non sono dichiarati supportati.

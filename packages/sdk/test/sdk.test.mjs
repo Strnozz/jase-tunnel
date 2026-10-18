@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { z } from 'zod';
 import { discoverTools } from '../src/discovery.mjs';
 import { defineSite, defineTool, adaptTool, TUNNEL_PROTOCOL } from '../src/server.mjs';
@@ -88,4 +88,48 @@ test('tools with unknown effects require a one-use confirmation and are not run 
  const approved=site.handle(req('confirm',{id:pending.confirmation.id,allow:true},browser(p)));
  const nextTask=await next(site,p);assert.equal(writes,1);await reply(site,p,nextTask,{content:'Done',toolCalls:[]});assert.equal((await approved).status,200);
  assert.equal((await site.handle(req('confirm',{id:pending.confirmation.id,allow:true},browser(p)))).status,410);assert.equal(writes,1);
+});
+
+test('CLI init wires an Express server and its pages once, before other middleware',t=>{
+ const root=fixture(t);mkdirSync(join(root,'public'));
+ writeFileSync(join(root,'package.json'),JSON.stringify({name:'express-fixture',dependencies:{express:'5.1.0'}}));
+ writeFileSync(join(root,'server.js'),`'use strict';\nconst express = require('express');\nconst app = express();\napp.use(express.json());\napp.use(express.static('public'));\napp.listen(3000);\n`);
+ writeFileSync(join(root,'public','index.html'),'<!doctype html><html><body><h1>Shop</h1></body></html>');
+ const cli=resolve('bin/cli.mjs'),run=(...args)=>spawnSync(process.execPath,[cli,...args,'--cwd',root],{encoding:'utf8'});
+ const result=run('init','--skip-install');assert.equal(result.status,0,result.stderr);
+ const server=readFileSync(join(root,'server.js'),'utf8');
+ assert.match(server,/import\("\.\/jase-tunnel\.config\.mjs"\)/);
+ assert.ok(server.indexOf('app.use((req, res, next) => jaseTunnel')>server.indexOf('const app = express();'));
+ assert.ok(server.indexOf('app.use((req, res, next) => jaseTunnel')<server.indexOf('app.use(express.json())'));
+ const page=readFileSync(join(root,'public','index.html'),'utf8');assert.equal((page.match(/client\/widget\.mjs/g)??[]).length,1);
+ assert.equal(run('init','--skip-install').status,0);
+ assert.equal(readFileSync(join(root,'server.js'),'utf8'),server);assert.equal(readFileSync(join(root,'public','index.html'),'utf8'),page);
+ assert.ok(existsSync(join(root,'.jase-tunnel','backups')));
+});
+
+test('CLI init wraps a node:http handler: manifest and panel are served, other requests reach the app',async t=>{
+ const root=fixture(t);
+ writeFileSync(join(root,'package.json'),JSON.stringify({name:'http-fixture',type:'module'}));
+ writeFileSync(join(root,'server.mjs'),`import http from 'node:http';\nconst server = http.createServer((req, res) => { res.end('app ' + req.url); });\nserver.listen(0, '127.0.0.1', () => console.log(server.address().port));\n`);
+ const cli=resolve('bin/cli.mjs');
+ const result=spawnSync(process.execPath,[cli,'init','--skip-install','--cwd',root],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);
+ assert.match(result.stdout,/Aggiungi il pannello alle tue pagine/);
+ assert.match(readFileSync(join(root,'server.mjs'),'utf8'),/http\.createServer\(withJaseTunnel\(\(req, res\) => \{ res\.end/);
+ mkdirSync(join(root,'node_modules'));symlinkSync(resolve('.'),join(root,'node_modules','jase-tunnel'),'dir');
+ const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root});t.after(()=>child.kill());
+ const port=await new Promise((done,fail)=>{child.stdout.once('data',d=>done(String(d).trim()));child.once('exit',code=>fail(new Error('server exited '+code)));});
+ const base=`http://127.0.0.1:${port}`;
+ const manifest=await (await fetch(base+'/.well-known/jase-tunnel.json')).json();
+ assert.equal(manifest.protocols[0],TUNNEL_PROTOCOL);assert.equal(manifest.name,'http-fixture');
+ const widget=await fetch(base+'/api/jase-tunnel/v1/client/widget.mjs');
+ assert.equal(widget.status,200);assert.match(widget.headers.get('content-type'),/javascript/);assert.match(await widget.text(),/mountJaseTunnel/);
+ assert.equal(await (await fetch(base+'/shop?x=1')).text(),'app /shop?x=1');
+});
+
+test('a grant revoked in the desktop app disappears from the browser session at once',async()=>{
+ const site=defineSite({origin,tools:[]}),p=await pair(site);
+ assert.equal((await (await site.handle(req('session',undefined,{cookie:p.cookie}))).json()).paired,true);
+ assert.equal((await site.handle(req('revoke',{},desktop(p)))).status,200);
+ assert.equal((await (await site.handle(req('session',undefined,{cookie:p.cookie}))).json()).paired,false);
+ assert.equal((await site.handle(req('poll',{},desktop(p)))).status,401);
 });

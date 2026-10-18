@@ -7,9 +7,11 @@ import (
 
 const activityLimit = 300
 
+// Site is the origin an event belongs to; empty for the app itself.
 type activityEvent struct {
 	ID       uint64    `json:"id"`
 	Time     time.Time `json:"time"`
+	Site     string    `json:"site,omitempty"`
 	Category string    `json:"category"`
 	Level    string    `json:"level"`
 	Title    string    `json:"title"`
@@ -17,7 +19,7 @@ type activityEvent struct {
 }
 
 // The panel keeps a bounded, process-local journal. It never sends these records
-// to Jase, and the public companion endpoints cannot read them.
+// to a site, and the public /tunnel/v1/ endpoints cannot read them.
 type activityLog struct {
 	mu         sync.Mutex
 	next       uint64
@@ -31,24 +33,29 @@ type activityLog struct {
 }
 
 func (a *application) record(category, level, title, detail string) {
+	a.recordFor("", category, level, title, detail)
+}
+
+// recordFor files the event under a site's console in the panel.
+func (a *application) recordFor(site, category, level, title, detail string) {
 	l := &a.activity
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.recordLocked(category, level, title, detail)
+	l.recordLocked(site, category, level, title, detail)
 }
 
 // Check the current privacy preference under the journal lock. A model callback
 // that began before debug was disabled must not reinsert text after the clear.
-func (a *application) recordDetailed(title, detail string) {
+func (a *application) recordDetailed(site, title, detail string) {
 	l := &a.activity
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if a.debug.Load() {
-		l.recordLocked("model", "info", title, detail)
+		l.recordLocked(site, "model", "info", title, detail)
 	}
 }
 
-func (l *activityLog) recordLocked(category, level, title, detail string) {
+func (l *activityLog) recordLocked(site, category, level, title, detail string) {
 	l.next++
 	if category == "server" {
 		l.sent++
@@ -62,7 +69,7 @@ func (l *activityLog) recordLocked(category, level, title, detail string) {
 	if level == "error" {
 		l.errors++
 	}
-	e := activityEvent{ID: l.next, Time: time.Now(), Category: category, Level: level, Title: clip(title, 300), Detail: clip(detail, 8000)}
+	e := activityEvent{ID: l.next, Time: time.Now(), Site: site, Category: category, Level: level, Title: clip(title, 300), Detail: clip(detail, 8000)}
 	if len(l.events) >= activityLimit {
 		copy(l.events, l.events[1:])
 		l.events[len(l.events)-1] = e

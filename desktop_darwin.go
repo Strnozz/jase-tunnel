@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo CFLAGS: -mmacosx-version-min=13.0
-#cgo LDFLAGS: -framework AppKit -framework CoreGraphics
+#cgo LDFLAGS: -framework AppKit -framework CoreGraphics -framework UserNotifications
 #include <stdlib.h>
 void JaseRunDesktop(void);
 void JaseShowDesktop(void);
@@ -12,6 +12,7 @@ void JaseStopDesktop(void);
 void JaseImportFinished(const char *);
 int JaseConfirmReplacement(void);
 void JaseStartupError(const char *);
+void JaseNotify(const char *, const char *, const char *);
 */
 import "C"
 
@@ -62,10 +63,24 @@ func jaseDesktopAction(action *C.char, enabled C.int) {
 		a.setModelThinking(enabled != 0)
 	case "clear":
 		a.clearActivity()
-	case "open-jase":
-		go a.openJase()
 	case "revoke-sites":
 		go a.revokeLinks()
+	}
+}
+
+//export jaseDesktopNotificationClicked
+func jaseDesktopNotificationClicked(id *C.char) {
+	if a := desktopApplication; a != nil {
+		identifier := C.GoString(id)
+		go a.requestWebConnection(identifier)
+	}
+}
+
+//export jaseDesktopRevokeSite
+func jaseDesktopRevokeSite(origin *C.char) {
+	if a := desktopApplication; a != nil {
+		site := C.GoString(origin)
+		go a.revokeSite(site)
 	}
 }
 
@@ -97,7 +112,6 @@ func nativeImport(a *application, path string, folder bool) {
 			a.importMu.Unlock()
 			if err == nil {
 				a.refreshModels()
-				a.publishModels()
 			}
 		}
 		message := "Pesi aggiunti. Il modello viene rilevato dal motore locale."
@@ -155,4 +169,14 @@ func desktopStartupError(message string) {
 	text := C.CString(message)
 	defer C.free(unsafe.Pointer(text))
 	C.JaseStartupError(text)
+}
+
+// Notification Center needs the signed app bundle; a bare development binary keeps
+// the announcement in the panel's journal only.
+func notifyDesktop(id, title, body string) {
+	identifier, heading, text := C.CString(id), C.CString(title), C.CString(body)
+	defer C.free(unsafe.Pointer(identifier))
+	defer C.free(unsafe.Pointer(heading))
+	defer C.free(unsafe.Pointer(text))
+	C.JaseNotify(identifier, heading, text)
 }

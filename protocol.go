@@ -29,14 +29,8 @@ type tool struct {
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
 }
-type trace struct {
-	Kind string `json:"kind"`
-	Ref  string `json:"ref"`
-	Turn int    `json:"turn"`
-}
 type task struct {
 	ID            string         `json:"id"`
-	Trace         *trace         `json:"trace,omitempty"`
 	Model         model          `json:"model"`
 	Messages      []message      `json:"messages"`
 	Tools         []tool         `json:"tools"`
@@ -53,12 +47,24 @@ type turn struct {
 
 var unauthorized = errors.New("device authorization expired")
 
-// How often a running inference asks Jase whether the request is still wanted.
+// The site a model turn belongs to, so inference events reach that site's console.
+type siteKey struct{}
+
+func siteOf(ctx context.Context) string {
+	site, _ := ctx.Value(siteKey{}).(string)
+	return site
+}
+
+// How often a running inference asks the site whether the request is still wanted.
 var statusEvery = 5 * time.Second
 
+// remote calls the broker the site declared in its manifest, for an unexpired grant.
 func (a *application) remote(ctx context.Context, c link, path string, input, output any) error {
-	if strings.ContainsAny(path, "?#") || strings.Contains(path, "..") || (c.Protocol == webProtocol && (!webOrigin(c.Origin) || !webBrokerPath(c.Broker) || c.ExpiresAt <= time.Now().UnixMilli())) || (c.Protocol != webProtocol && !allowedOrigin(c.Origin)) {
-		return errors.New("invalid Jase origin or endpoint")
+	if strings.ContainsAny(path, "?#") || strings.Contains(path, "..") || !webOrigin(c.Origin) || !webBrokerPath(c.Broker) || c.ExpiresAt <= time.Now().UnixMilli() {
+		return errors.New("invalid site origin or endpoint")
+	}
+	if path != "pair" && !a.webGrantActive(c) {
+		return unauthorized
 	}
 	var body io.Reader
 	if input != nil {
@@ -68,22 +74,8 @@ func (a *application) remote(ctx context.Context, c link, path string, input, ou
 		}
 		body = bytes.NewReader(data)
 	}
-	method := "POST"
-	if strings.HasPrefix(path, "active") {
-		method = "GET"
-	}
-	base := "/api/companion/"
-	client := a.client
-	if c.Protocol == webProtocol {
-		base = c.Broker
-		client = a.webHTTPClient()
-		if path != "pair" && !a.webGrantActive(c) {
-			return unauthorized
-		}
-	}
-	endpoint := c.Origin + base + path
-	// active's query is constructed separately, never supplied by a model.
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	endpoint := c.Origin + c.Broker + path
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {
 		return err
 	}
@@ -98,30 +90,30 @@ func (a *application) remote(ctx context.Context, c link, path string, input, ou
 	}
 	started := time.Now()
 	if path != "poll" {
-		a.debugf("→ Jase %s /api/companion/%s%s", method, path, sizeOf(input))
+		a.debugFor(c.Origin, "→ sito POST %s%s", endpoint, sizeOf(input))
 	} else {
-		a.record("server", "info", "In attesa di richieste da Jase", "POST /api/companion/poll")
+		a.recordFor(c.Origin, "server", "info", "In attesa di richieste dal sito", c.Origin)
 	}
-	response, err := client.Do(req)
+	response, err := a.webHTTPClient().Do(req)
 	if err != nil {
 		if path != "poll" || ctx.Err() == nil {
-			a.debugf("✗ Jase %s: %v", path, err)
+			a.debugFor(c.Origin, "✗ sito %s: %v", path, err)
 		}
 		return err
 	}
 	defer response.Body.Close()
 	a.serverContact(c.Origin)
 	if path == "poll" && response.StatusCode == 200 {
-		a.record("receive", "info", "Ricezione dal server", fmt.Sprintf("/api/companion/poll · HTTP 200 · %s", time.Since(started).Round(time.Millisecond)))
+		a.recordFor(c.Origin, "receive", "info", "Ricezione dal sito", fmt.Sprintf("%s · HTTP 200 · %s", c.Origin, time.Since(started).Round(time.Millisecond)))
 	}
 	if path != "poll" || response.StatusCode != 200 {
-		a.debugf("← Jase %s: HTTP %d in %s", path, response.StatusCode, time.Since(started).Round(time.Millisecond))
+		a.debugFor(c.Origin, "← sito %s: HTTP %d in %s", path, response.StatusCode, time.Since(started).Round(time.Millisecond))
 	}
 	if response.StatusCode == 401 {
 		return unauthorized
 	}
 	if response.StatusCode != 200 {
-		return fmt.Errorf("Jase endpoint HTTP %d", response.StatusCode)
+		return fmt.Errorf("site endpoint HTTP %d", response.StatusCode)
 	}
 	if output == nil {
 		_, err = io.Copy(io.Discard, io.LimitReader(response.Body, 160000))
@@ -130,32 +122,23 @@ func (a *application) remote(ctx context.Context, c link, path string, input, ou
 	return json.NewDecoder(io.LimitReader(response.Body, 1100000)).Decode(output)
 }
 func (a *application) isActive(ctx context.Context, c link, id string) (bool, error) {
-	if c.Protocol == webProtocol && !a.webGrantActive(c) {
+	if !a.webGrantActive(c) {
 		return false, unauthorized
 	}
-	if c.Protocol != webProtocol && !allowedOrigin(c.Origin) {
-		return false, errors.New("invalid origin")
-	}
-	base := "/api/companion/"
-	client := a.client
-	if c.Protocol == webProtocol {
-		base = c.Broker
-		client = a.webHTTPClient()
-	}
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Origin+base+"active?id="+url.QueryEscape(id), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.Origin+c.Broker+"active?id="+url.QueryEscape(id), nil)
 	if err != nil {
 		return false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	a.debugf("→ Jase GET /api/companion/active")
-	response, err := client.Do(req)
+	a.debugFor(c.Origin, "→ sito GET %s%sactive", c.Origin, c.Broker)
+	response, err := a.webHTTPClient().Do(req)
 	if err != nil {
-		a.debugf("Jase ✗ controllo della richiesta: %v", err)
+		a.debugFor(c.Origin, "✗ sito: controllo della richiesta: %v", err)
 		return false, err
 	}
 	defer response.Body.Close()
 	a.serverContact(c.Origin)
-	a.debugf("← Jase active: HTTP %d", response.StatusCode)
+	a.debugFor(c.Origin, "← sito active: HTTP %d", response.StatusCode)
 	if response.StatusCode == 401 {
 		return false, unauthorized
 	}
@@ -179,7 +162,10 @@ func (a *application) startLink(c link) {
 	go func() {
 		defer func() { a.mu.Lock(); delete(a.running, c.Token); a.mu.Unlock() }()
 		for a.ctx.Err() == nil {
-			if !a.linkStored(c) {
+			if !a.webGrantActive(c) {
+				if c.ExpiresAt <= time.Now().UnixMilli() {
+					a.recordFor(c.Origin, "app", "info", "Tunnel scaduto", "Il collegamento dura al massimo 30 minuti: il sito può chiederne uno nuovo.")
+				}
 				a.forget(c.Token)
 				return
 			}
@@ -188,11 +174,14 @@ func (a *application) startLink(c link) {
 			}
 			err := a.remote(a.ctx, c, "poll", nil, &response)
 			if errors.Is(err, unauthorized) {
+				if a.webGrantActive(c) {
+					a.recordFor(c.Origin, "app", "info", "Tunnel chiuso dal sito", "Il sito ha revocato il collegamento.")
+				}
 				a.forget(c.Token)
 				return
 			}
-			// «Scollega siti» may have removed the link while the long poll was waiting.
-			if !a.linkStored(c) {
+			// «Scollega siti» may have removed the grant while the long poll was waiting.
+			if !a.webGrantActive(c) {
 				return
 			}
 			if err != nil {
@@ -221,46 +210,27 @@ func (a *application) forget(token string) {
 	a.settings.Links = kept
 	_ = a.saveLocked()
 }
-
-// linkStored reports whether the person still keeps this link: a web grant must also
-// be unexpired, a Jase link must still be among the saved connections.
-func (a *application) linkStored(c link) bool {
-	if c.Protocol == webProtocol {
-		return a.webGrantActive(c)
-	}
-	if !allowedOrigin(c.Origin) {
-		return false
-	}
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for _, stored := range a.settings.Links {
-		if stored.Protocol == "" && stored.Token == c.Token {
-			return true
-		}
-	}
-	return false
-}
 func (a *application) handleTask(c link, t task) {
-	if c.Protocol == webProtocol && (!a.webGrantActive(c) || !validWebTask(c, t)) {
-		a.record("model", "error", "Turno rifiutato", "Il server ha richiesto un modello o limiti diversi dal consenso.")
+	if !a.webGrantActive(c) || !validWebTask(c, t) {
+		a.recordFor(c.Origin, "model", "error", "Turno rifiutato", "Il server ha richiesto un modello o limiti diversi dal consenso.")
 		return
 	}
 	started, label, outcome := time.Now(), queryLabel(t), "annullata"
 	log.Printf("===== Start query · %s =====", label)
-	a.logTask(t)
+	a.logTask(c.Origin, t)
 	defer func() {
 		log.Printf("===== End reply · %s · %s · %.1fs =====", label, outcome, time.Since(started).Seconds())
 		level := "info"
 		if strings.Contains(outcome, "errore") || strings.Contains(outcome, "NON consegnata") {
 			level = "error"
 		}
-		a.record("model", level, "Richiesta terminata", fmt.Sprintf("%s · %s · %.1fs", label, outcome, time.Since(started).Seconds()))
+		a.recordFor(c.Origin, "model", level, "Richiesta terminata", fmt.Sprintf("%s · %s · %.1fs", label, outcome, time.Since(started).Seconds()))
 	}()
 	deadline := time.UnixMilli(t.ExpiresAt)
 	if deadline.After(time.Now().Add(10 * time.Minute)) {
 		deadline = time.Now().Add(10 * time.Minute)
 	}
-	ctx, cancel := context.WithDeadline(a.ctx, deadline)
+	ctx, cancel := context.WithDeadline(context.WithValue(a.ctx, siteKey{}, c.Origin), deadline)
 	defer cancel()
 	a.mu.Lock()
 	if a.runs == nil {
@@ -269,13 +239,14 @@ func (a *application) handleTask(c link, t task) {
 	a.runs[c.Token] = cancel
 	a.mu.Unlock()
 	defer func() { a.mu.Lock(); delete(a.runs, c.Token); a.mu.Unlock() }()
-	// Stop local inference when the browser cancels, a server task expires, or Jase
+	// Stop local inference when the browser cancels, a server task expires, or the site
 	// becomes unreachable. A request can never turn into detached background work.
-	// One failed check is a network blip, not a cancellation: stop only on Jase's answer
-	// "not active", a revoked device, or three failed checks in a row (15 s; Jase itself
-	// gives up on a silent computer after 30 s).
+	// One failed check is a network blip, not a cancellation: stop only on the site's
+	// answer "not active", a revoked grant, or three failed checks in a row (15 s; the
+	// module's broker gives up on a silent computer after 30 s).
+	every := statusEvery
 	go func() {
-		ticker := time.NewTicker(statusEvery)
+		ticker := time.NewTicker(every)
 		defer ticker.Stop()
 		failures := 0
 		for {
@@ -305,13 +276,13 @@ func (a *application) handleTask(c link, t task) {
 	case <-ctx.Done():
 		return
 	}
-	if ctx.Err() != nil || c.Protocol == webProtocol && !a.webGrantActive(c) {
+	if ctx.Err() != nil || !a.webGrantActive(c) {
 		<-a.inference
 		return
 	}
 	answer, err := a.infer(ctx, t)
 	<-a.inference
-	if ctx.Err() != nil || c.Protocol == webProtocol && !a.webGrantActive(c) {
+	if ctx.Err() != nil || !a.webGrantActive(c) {
 		return
 	}
 	if err != nil {
@@ -322,24 +293,7 @@ func (a *application) handleTask(c link, t task) {
 		result = answer
 	}
 	if err := a.remote(ctx, c, "result", map[string]any{"id": t.ID, "result": result}, nil); err != nil {
-		outcome = "risposta NON consegnata a Jase: " + err.Error()
-	}
-}
-func (a *application) publishModels() {
-	a.mu.RLock()
-	connections := append([]link{}, a.settings.Links...)
-	models := append([]model{}, a.models...)
-	a.mu.RUnlock()
-	for _, c := range connections {
-		if c.Protocol == webProtocol {
-			continue
-		}
-		ctx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
-		err := a.remote(ctx, c, "models", map[string]any{"models": models}, nil)
-		cancel()
-		if errors.Is(err, unauthorized) {
-			a.forget(c.Token)
-		}
+		outcome = "risposta NON consegnata al sito: " + err.Error()
 	}
 }
 func (a *application) watchModels() {
@@ -351,7 +305,6 @@ func (a *application) watchModels() {
 			return
 		case <-ticker.C:
 			a.refreshModels()
-			a.publishModels()
 		}
 	}
 }

@@ -17,11 +17,14 @@ type desktopIdentity struct {
 	Development bool   `json:"development"`
 }
 
+// Jase Tunnel 0.2 and earlier identified their local service with this older protocol.
+const previousLocalProtocol = "jase-companion-v1"
+
 func currentDesktop(state desktopIdentity) bool {
-	return state.Protocol == protocol && state.Desktop && state.DesktopUI == desktopUIName && state.Version == version && state.Development == (devBuild == "true")
+	return state.Protocol == webProtocol && state.Desktop && state.DesktopUI == desktopUIName && state.Version == version && state.Development == (devBuild == "true")
 }
 
-// Opening Jase twice focuses its existing window. An invisible older version can
+// Opening Jase Tunnel twice focuses its existing window. An invisible older version can
 // be replaced only after a native, explicit choice; unrelated listeners are left alone.
 func (a *application) resolveExistingDesktop() net.Listener {
 	base := fmt.Sprintf("http://127.0.0.1:%d", a.port)
@@ -32,8 +35,8 @@ func (a *application) resolveExistingDesktop() net.Listener {
 		err = json.NewDecoder(http.MaxBytesReader(nil, response.Body, 64000)).Decode(&state)
 		response.Body.Close()
 	}
-	if err != nil || state.Protocol != protocol {
-		desktopStartupError("Il servizio locale è già occupato. Chiudi l’altra applicazione e riapri Jase.")
+	if err != nil || state.Protocol != webProtocol && state.Protocol != previousLocalProtocol {
+		desktopStartupError("Il servizio locale è già occupato. Chiudi l’altra applicazione e riapri Jase Tunnel.")
 		return nil
 	}
 	post := func(action string) bool {
@@ -55,7 +58,7 @@ func (a *application) resolveExistingDesktop() net.Listener {
 		return nil
 	}
 	if !post("quit") {
-		desktopStartupError("La versione precedente non si è chiusa. Chiudila e riapri Jase.")
+		desktopStartupError("La versione precedente non si è chiusa. Chiudila e riapri Jase Tunnel.")
 		return nil
 	}
 	for i := 0; i < 30; i++ {
@@ -65,6 +68,6 @@ func (a *application) resolveExistingDesktop() net.Listener {
 			return listener
 		}
 	}
-	desktopStartupError("La versione precedente si sta ancora chiudendo. Riapri Jase tra un momento.")
+	desktopStartupError("La versione precedente si sta ancora chiudendo. Riapri Jase Tunnel tra un momento.")
 	return nil
 }

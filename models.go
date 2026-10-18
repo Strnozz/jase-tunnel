@@ -26,8 +26,8 @@ type model struct {
 	SizeBytes     int64  `json:"sizeBytes,omitempty"`
 	ContextTokens int    `json:"contextTokens,omitempty"`
 	Tools         bool   `json:"tools"`
-	// Local only: Ollama declares the "thinking" capability. Jase turns thinking off for
-	// these and sends no think option to the others.
+	// Local only: Ollama declares the "thinking" capability. Jase Tunnel turns thinking
+	// off for these (unless --think) and sends no think option to the others.
 	Thinking bool `json:"-"`
 }
 
@@ -227,8 +227,8 @@ func studioModels(ctx context.Context) []model {
 
 // Chat Completions cannot choose its context length. Reuse a sufficient loaded
 // instance, or load this already-installed model locally with the task's budget.
-// owned is the instance Jase loaded earlier for this model: a larger load replaces it,
-// so memory holds at most one Jase instance per model. Instances the person loaded in
+// owned is the instance Jase Tunnel loaded earlier for this model: a larger load replaces it,
+// so memory holds at most one tunnel instance per model. Instances the person loaded in
 // LM Studio are never unloaded. loaded reports whether the returned instance is new.
 func studioInstance(ctx context.Context, name string, contextTokens int, owned string) (id string, loaded bool, err error) {
 	var list struct {
@@ -288,6 +288,7 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 	if len(t.Messages) == 0 || len(t.Messages) > 300 || len(t.Tools) > 100 || t.MaxTokens < 1 || t.MaxTokens > 16384 || t.ContextTokens < 2048 || t.ContextTokens > 262144 {
 		return turn{}, errors.New("invalid model request")
 	}
+	site := siteOf(ctx)
 	a.mu.RLock()
 	found, thinks, contextTokens := false, false, 0
 	for _, m := range a.models {
@@ -368,11 +369,11 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 			EvalCount       int            `json:"eval_count"`
 			EvalDuration    int64          `json:"eval_duration"`
 		}
-		a.record("model", "info", "Modello avviato", name+" · Ollama")
-		a.debugf("LLM → Ollama %s · contesto %d · max %d token · thinking %s", name, t.ContextTokens, t.MaxTokens, onOff(thinks && a.think.Load(), thinks))
+		a.recordFor(site, "model", "info", "Modello avviato", name+" · Ollama")
+		a.debugFor(site, "LLM → Ollama %s · contesto %d · max %d token · thinking %s", name, t.ContextTokens, t.MaxTokens, onOff(thinks && a.think.Load(), thinks))
 		started := time.Now()
 		if err := localJSON(ctx, ollamaURL, "/api/chat", request, &response, 600000); err != nil {
-			a.debugf("LLM ✗ %v", err)
+			a.debugFor(site, "LLM ✗ %v", err)
 			return turn{}, err
 		}
 		raw = response.Message
@@ -380,7 +381,7 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		if response.EvalDuration > 0 {
 			speed = fmt.Sprintf(" · %.1f token/s", float64(response.EvalCount)/(float64(response.EvalDuration)/1e9))
 		}
-		a.debugf("LLM ← %s · prompt %d token · generati %d token%s", time.Since(started).Round(time.Millisecond), response.PromptEvalCount, response.EvalCount, speed)
+		a.debugFor(site, "LLM ← %s · prompt %d token · generati %d token%s", time.Since(started).Round(time.Millisecond), response.PromptEvalCount, response.EvalCount, speed)
 	} else if t.Model.Engine == "lmstudio" {
 		a.mu.RLock()
 		owned := a.studioLoaded[name]
@@ -412,14 +413,14 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 				Completion int `json:"completion_tokens"`
 			} `json:"usage"`
 		}
-		a.record("model", "info", "Modello avviato", name+" · LM Studio")
-		a.debugf("LLM → LM Studio %s · contesto %d · max %d token", name, t.ContextTokens, t.MaxTokens)
+		a.recordFor(site, "model", "info", "Modello avviato", name+" · LM Studio")
+		a.debugFor(site, "LLM → LM Studio %s · contesto %d · max %d token", name, t.ContextTokens, t.MaxTokens)
 		started := time.Now()
 		if err := localJSON(ctx, studioURL, "/v1/chat/completions", request, &response, 600000); err != nil {
-			a.debugf("LLM ✗ %v", err)
+			a.debugFor(site, "LLM ✗ %v", err)
 			return turn{}, err
 		}
-		a.debugf("LLM ← %s · prompt %d token · generati %d token", time.Since(started).Round(time.Millisecond), response.Usage.Prompt, response.Usage.Completion)
+		a.debugFor(site, "LLM ← %s · prompt %d token · generati %d token", time.Since(started).Round(time.Millisecond), response.Usage.Prompt, response.Usage.Completion)
 		if len(response.Choices) == 0 {
 			return turn{}, errors.New("empty model response")
 		}
@@ -428,7 +429,7 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		return turn{}, errors.New("unsupported local engine")
 	}
 	result := turn{ToolCalls: []toolCall{}}
-	a.logThinking(raw)
+	a.logThinking(site, raw)
 	if content, ok := raw["content"].(string); ok {
 		result.Content = strings.TrimSpace(thinking.ReplaceAllString(content, ""))
 	}
@@ -462,7 +463,7 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 			result.ToolCalls = append(result.ToolCalls, toolCall{Name: toolName, Arguments: arguments})
 		}
 	}
-	a.logAnswer(result)
+	a.logAnswer(site, result)
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return turn{}, errors.New("empty model response")
 	}

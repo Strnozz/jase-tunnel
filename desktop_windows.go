@@ -27,6 +27,8 @@ var (
 	winShow   atomic.Bool
 	winStop   atomic.Bool
 	winPanel  *windowsPanel // Accessed only by the window's locked OS thread.
+	// Latest announcement (discovery id, title, text) waiting for the window thread.
+	winAnnouncement atomic.Pointer[[3]string]
 )
 
 const (
@@ -51,8 +53,10 @@ const (
 	idFilter    = 110
 	idModelList = 111
 	idEventList = 112
-	idOpenSite  = 113
+	idNotice    = 113 // Click on the tray balloon of a compatible page.
 	idRevoke    = 114
+	idSiteList  = 115 // Activity tab: the sites, each with its own console.
+	idRevokeOne = 116 // «Scollega sito» for the selected site.
 )
 
 type winPoint struct{ X, Y int32 }
@@ -101,6 +105,9 @@ type windowsPanel struct {
 	activity, tray                                              bool
 	consenting                                                  bool
 	scale                                                       int
+	announcement                                                string
+	sites                                                       []panelSite
+	site                                                        string // Key of the console shown
 }
 
 func init()                   { runtime.LockOSThread() }
@@ -163,6 +170,8 @@ func windowsTrayAction(event uintptr) int {
 		return idOpen // Double click or keyboard activation.
 	case 0x7b:
 		return -1 // Native context menu (mouse or keyboard).
+	case 0x405:
+		return idNotice // NIN_BALLOONUSERCLICK
 	}
 	return 0
 }
@@ -178,6 +187,25 @@ func (p *windowsPanel) addTray() bool {
 	}
 	p.tray = ok != 0
 	return p.tray
+}
+
+// The tray balloon (a toast on Windows 10 and later) announces a compatible page.
+// Windows respects quiet hours and focus assist; the panel's journal keeps the event.
+func notifyDesktop(id, title, body string) {
+	winAnnouncement.Store(&[3]string{id, title, body})
+}
+func (p *windowsPanel) balloon(n *[3]string) {
+	if !p.tray {
+		return
+	}
+	p.announcement = n[0]
+	icon := winNotifyIcon{Window: p.hwnd, ID: 1, Flags: 0x10, InfoFlags: 1 | 0x80}
+	icon.Size = uint32(unsafe.Sizeof(icon))
+	title, _ := syscall.UTF16FromString(n[1])
+	text, _ := syscall.UTF16FromString(n[2])
+	copy(icon.InfoTitle[:len(icon.InfoTitle)-1], title)
+	copy(icon.Info[:len(icon.Info)-1], text)
+	shell32.NewProc("Shell_NotifyIconW").Call(1, uintptr(unsafe.Pointer(&icon)))
 }
 func (p *windowsPanel) removeTray() {
 	n := winNotifyIcon{Window: p.hwnd, ID: 1}
@@ -237,8 +265,20 @@ func (p *windowsPanel) command(id, notification int) {
 		p.a.cancel()
 	case idRevoke:
 		go p.a.revokeLinks()
-	case idOpenSite:
-		go p.a.openJase()
+	case idSiteList:
+		if index := winListSelection(p.controls[idSiteList]); notification == 1 && index >= 0 && index < len(p.sites) {
+			p.site = p.sites[index].Key
+			p.refresh()
+		}
+	case idRevokeOne:
+		if p.site != allSites && p.site != "" {
+			go p.a.revokeSite(p.site)
+		}
+	case idNotice:
+		if p.announcement != "" {
+			go p.a.requestWebConnection(p.announcement)
+			p.announcement = ""
+		}
 	case idModels:
 		p.activity = false
 		p.layout()
@@ -343,6 +383,9 @@ func winProcedure(hwnd uintptr, message uint32, wparam, lparam uintptr) uintptr 
 			if winShow.Swap(false) {
 				p.show()
 			}
+			if n := winAnnouncement.Swap(nil); n != nil {
+				p.balloon(n)
+			}
 			p.refresh()
 			return 0
 		}
@@ -368,8 +411,7 @@ func (p *windowsPanel) layout() {
 	}
 	p.position(p.status, 24, 18, w-48, 30)
 	p.position(p.connection, 24, 52, w-48, 24)
-	p.position(p.controls[idOpenSite], 24, 84, 130, 30)
-	p.position(p.controls[idAdd], 166, 84, 140, 30)
+	p.position(p.controls[idAdd], 24, 84, 140, 30)
 	p.position(p.controls[idQuit], w-190, 84, 166, 30)
 	p.position(p.controls[idModels], 24, 130, 130, 30)
 	p.position(p.controls[idActivity], 166, 130, 130, 30)
@@ -378,10 +420,12 @@ func (p *windowsPanel) layout() {
 	p.position(p.controls[idImport], 24, h-181, 190, 30)
 	p.position(p.notice, 24, h-143, w-48, 40)
 	p.position(p.stats, 24, 170, w-48, 24)
-	p.position(p.controls[idFilter], 24, 200, 270, 200)
+	p.position(p.controls[idSiteList], 24, 200, 230, h-308)
+	p.position(p.controls[idFilter], 266, 200, 230, 200)
+	p.position(p.controls[idRevokeOne], w-370, 200, 166, 28)
 	p.position(p.controls[idClear], w-194, 200, 170, 28)
-	p.position(p.controls[idEventList], 24, 240, w-48, h-475)
-	p.position(p.detail, 24, h-225, w-48, 117)
+	p.position(p.controls[idEventList], 266, 240, w-290, h-475)
+	p.position(p.detail, 266, h-225, w-290, 117)
 	p.position(p.controls[idDebug], 24, h-96, w-48, 23)
 	p.position(p.controls[idThinking], 24, h-69, w-48, 23)
 	p.position(p.privacy, 24, h-42, w-48, 36)
@@ -389,7 +433,7 @@ func (p *windowsPanel) layout() {
 		winCall("ShowWindow", p.controls[id], boolShow(!p.activity))
 	}
 	winCall("ShowWindow", p.notice, boolShow(!p.activity))
-	for _, id := range []int{idFilter, idClear, idEventList} {
+	for _, id := range []int{idFilter, idClear, idEventList, idSiteList, idRevokeOne} {
 		winCall("ShowWindow", p.controls[id], boolShow(p.activity))
 	}
 	for _, h := range []uintptr{p.stats, p.detail} {
@@ -434,6 +478,10 @@ func (p *windowsPanel) refresh() {
 			defer func() { p.consenting = false }()
 			key := ""
 			p.show()
+			// Show the requesting site's console behind the consent question.
+			p.site, p.activity, p.sites = approval.Origin, true, nil
+			p.layout()
+			p.refresh()
 			if len(approval.Models) > 0 && winMessageBox(p.hwnd, webConsentText(approval)+"\n\nPremi Sì, poi scegli il modello da autorizzare.", 0x4|0x20|0x100) == 6 {
 				menu := winCall("CreatePopupMenu")
 				for i, m := range approval.Models {
@@ -460,7 +508,30 @@ func (p *windowsPanel) refresh() {
 		}
 	}
 	filter := int(winCall("SendMessageW", p.controls[idFilter], 0x147, 0, 0))
-	s := p.a.panelSnapshot(filter)
+	s := p.a.panelSnapshot(filter, p.site)
+	if !reflect.DeepEqual(p.sites, s.Sites) {
+		selected := 0
+		for i, site := range s.Sites {
+			if site.Key == p.site {
+				selected = i
+			}
+		}
+		rows := []string{}
+		for _, site := range s.Sites {
+			mark := "    "
+			if site.Open {
+				mark = "●  "
+			}
+			rows = append(rows, mark+site.Label+"  —  "+site.Status)
+		}
+		p.sites, p.site = s.Sites, s.Sites[selected].Key
+		winListFill(p.controls[idSiteList], rows, selected)
+	}
+	open := false
+	for _, site := range p.sites {
+		open = open || site.Key == p.site && site.Open
+	}
+	winCall("EnableWindow", p.controls[idRevokeOne], boolFlag(open))
 	winText(p.status, s.Title)
 	winText(p.connection, s.Connection)
 	winText(p.stats, s.Statistics)
@@ -496,7 +567,7 @@ func (a *application) runDesktopUI() {
 	if a.ctx.Err() != nil {
 		return
 	}
-	p := &windowsPanel{a: a, controls: map[int]uintptr{}, scale: 96}
+	p := &windowsPanel{a: a, controls: map[int]uintptr{}, scale: 96, site: allSites}
 	winPanel = p
 	defer func() { winHandle.Store(0); winPanel = nil }()
 	user32.NewProc("SetProcessDPIAware").Call()
@@ -545,12 +616,12 @@ func (a *application) runDesktopUI() {
 	for _, button := range []struct {
 		id   int
 		text string
-	}{{idRevoke, "Scollega siti"}, {idOpenSite, "Apri Jase"}, {idAdd, "Aggiungi pesi…"}, {idQuit, trayLabels[2]}, {idModels, "Modelli"}, {idActivity, "Attività"}, {idImport, "Aggiungi selezionati"}, {idClear, "Svuota registro"}} {
+	}{{idRevoke, "Scollega siti"}, {idRevokeOne, "Scollega sito"}, {idAdd, "Aggiungi pesi…"}, {idQuit, trayLabels[2]}, {idModels, "Modelli"}, {idActivity, "Attività"}, {idImport, "Aggiungi selezionati"}, {idClear, "Svuota registro"}} {
 		p.child("BUTTON", button.text, 0x10000, button.id)
 	}
 	p.child("BUTTON", "Log dettagliato, inclusi i testi", 0x10003, idDebug)
 	p.child("BUTTON", "Ragionamento del modello, se supportato", 0x10003, idThinking)
-	for _, id := range []int{idModelList, idEventList} {
+	for _, id := range []int{idModelList, idEventList, idSiteList} {
 		p.child("LISTBOX", "", 0x10000|0x200000|0x100000|0x800000|1|0x100, id)
 		winCall("SendMessageW", p.controls[id], 0x194, 1600, 0)
 	}

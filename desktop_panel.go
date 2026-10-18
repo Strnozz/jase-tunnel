@@ -14,10 +14,23 @@ var panelFilters = []struct{ Label, Category string }{
 
 var trayLabels = []string{"Apri Jase Tunnel", "Aggiungi pesi", "Chiudi Jase Tunnel"}
 
+const idleConnectionText = "Naviga normalmente: ti avviso quando una pagina accetta il tunnel"
+
 type panelModel struct{ ID, Name, Engine, Status string }
+
+// panelSite is a row of the Activity tab's site list: Key selects that site's console.
+type panelSite struct {
+	Key, Label, Status string
+	Open               bool
+}
+
+// allSites is the Key of the list's first row: every console together.
+const allSites = "*"
+
 type panelSnapshot struct {
 	Title, Connection, Statistics, Privacy string
 	Models                                 []panelModel
+	Sites                                  []panelSite
 	Events                                 []activityEvent
 	Generation                             uint64
 	Debug, Thinking                        bool
@@ -25,17 +38,23 @@ type panelSnapshot struct {
 
 // Every desktop uses the same sanitized in-process snapshot. The private
 // journal never becomes an HTTP endpoint or a browser-accessible document.
-func (a *application) panelSnapshot(filter int) panelSnapshot {
+func (a *application) panelSnapshot(filter int, site string) panelSnapshot {
 	s := a.desktopState(0)
-	p := panelSnapshot{Title: "Jase Tunnel è in esecuzione", Connection: "Apri Jase IA e scegli «Usa il mio modello»", Debug: s["debug"].(bool), Thinking: s["thinking"].(bool), Generation: s["generation"].(uint64)}
-	origins := []string{}
-	for _, c := range s["connections"].([]map[string]any) {
-		if c["connected"].(bool) {
-			origins = append(origins, c["origin"].(string))
+	p := panelSnapshot{Title: "Jase Tunnel è in esecuzione", Connection: idleConnectionText, Debug: s["debug"].(bool), Thinking: s["thinking"].(bool), Generation: s["generation"].(uint64)}
+	p.Sites = []panelSite{{Key: allSites, Label: "Tutte le attività", Status: "App e siti insieme"}, {Key: "", Label: "Jase Tunnel", Status: "Avvio, modelli e impostazioni"}}
+	open, waiting := []string{}, 0
+	for _, x := range s["sites"].([]desktopSite) {
+		p.Sites = append(p.Sites, panelSite{Key: x.Origin, Label: x.Label, Status: x.Status, Open: x.State == "open"})
+		if x.State == "open" {
+			open = append(open, x.Label+" ("+x.Model+")")
+		}
+		if x.State == "awaiting_approval" {
+			waiting++
 		}
 	}
-	if len(origins) > 0 {
-		p.Title, p.Connection = "Collegato a Jase", strings.Join(origins, " · ")
+	p.Title, p.Connection = openTunnelsText(len(open), waiting), strings.Join(open, "   ·   ")
+	if len(open) == 0 {
+		p.Connection = idleConnectionText
 	}
 	stats := s["statistics"].(map[string]uint64)
 	p.Statistics = fmt.Sprintf("↑ %d invii   ·   ↓ %d ricezioni   ·   ◇ %d turni del modello   ·   %d errori", stats["sent"], stats["received"], stats["modelTurns"], stats["errors"])
@@ -61,11 +80,43 @@ func (a *application) panelSnapshot(filter int) panelSnapshot {
 	}
 	category := panelFilters[filter].Category
 	for _, e := range s["events"].([]activityEvent) {
+		if site != allSites && e.Site != site {
+			continue
+		}
 		if category == "all" || e.Category == category || (category == "error" && e.Level == "error") {
 			p.Events = append(p.Events, e)
 		}
 	}
 	return p
+}
+
+func openTunnelsText(open, waiting int) string {
+	text := "Jase Tunnel è in esecuzione"
+	switch {
+	case open == 1:
+		text = "1 tunnel aperto"
+	case open > 1:
+		text = fmt.Sprintf("%d tunnel aperti", open)
+	}
+	if waiting == 1 {
+		text += " · un sito chiede il tunnel"
+	} else if waiting > 1 {
+		text += fmt.Sprintf(" · %d siti chiedono il tunnel", waiting)
+	}
+	return text
+}
+
+// The Activity tab keeps the chosen console across refreshes, by site rather than row.
+func panelSiteSelection(old, current []panelSite, selected int) int {
+	if selected < 0 || selected >= len(old) {
+		return 0
+	}
+	for i, s := range current {
+		if s.Key == old[selected].Key {
+			return i
+		}
+	}
+	return 0
 }
 
 func eventSummary(e activityEvent) string {
@@ -130,7 +181,6 @@ func (a *application) importFromDesktop(selectPath func(context.Context) (string
 		message, level := "Pesi aggiunti. Il modello viene rilevato dal motore locale.", "info"
 		if err == nil {
 			a.refreshModels()
-			a.publishModels()
 		} else {
 			message, level = err.Error(), "error"
 		}

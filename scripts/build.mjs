@@ -22,7 +22,7 @@ const run = (command, arguments_, options = {}) => {
   const result = spawnSync(command, arguments_, { stdio: "inherit", ...options });
   if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message ?? result.status}`);
 };
-// An exported folder may still live inside Jase's checkout. Never attribute its
+// An exported copy may live inside another project's checkout. Never attribute its
 // binaries to a parent repository; use Git metadata only after it has its own .git.
 const ownRepository = existsSync(join(root, ".git"));
 const git = arguments_ => spawnSync("git", arguments_, { cwd: root, encoding: "utf8" });
@@ -63,32 +63,32 @@ try {
   run(go, ["test", "./..."], { cwd: root, env: { ...process.env, GOTOOLCHAIN: "local", GOPROXY: "off", GOSUMDB: "off" } });
   for (const arch of ["amd64", "arm64"]) {
     const name = arch === "amd64" ? "x64" : arch;
-    const windows = `Jase-Windows-${name}.exe`; compile("windows", arch, join(output, windows)); record(`windows-${name}`, windows);
-    const dir = join(temporary, `linux-${name}`, "Jase"); mkdirSync(dir, { recursive: true }); compile("linux", arch, join(dir, "Jase")); chmodSync(join(dir, "Jase"), 0o755);
-    writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia Jase: si apre il pannello nativo con modelli, collegamenti e registro attività. Serve GTK 3 (libgtk-3-0 oppure libgtk-3-0t64 su Ubuntu/Debian).\n\nIl menu dell’icona offre Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Per l’area di notifica è consigliato Ayatana AppIndicator; sui desktop senza supporto alle icone, chiudere la finestra la riduce a icona nella barra applicazioni.\n\nLascia aperta la scheda Jase su Usa il mio modello per il collegamento automatico. Per terminare il processo scegli Chiudi Jase Tunnel nel pannello o nel menu.\n\nPer la diagnostica da terminale: ./Jase --headless --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
+    const windows = `Jase-Tunnel-Windows-${name}.exe`; compile("windows", arch, join(output, windows)); record(`windows-${name}`, windows);
+    const dir = join(temporary, `linux-${name}`, "Jase-Tunnel"); mkdirSync(dir, { recursive: true }); compile("linux", arch, join(dir, "jase-tunnel")); chmodSync(join(dir, "jase-tunnel"), 0o755);
+    writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia jase-tunnel: si apre il pannello nativo con modelli, collegamenti e registro attività. Serve GTK 3 (libgtk-3-0 oppure libgtk-3-0t64 su Ubuntu/Debian).\n\nMentre navighi, le pagine che accettano Jase Tunnel si annunciano e ricevi una notifica (serve notify-send, pacchetto libnotify-bin). Il collegamento parte solo dopo che hai scelto il modello nel pannello e dura al massimo 30 minuti.\n\nIl menu dell’icona offre Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Per l’area di notifica è consigliato Ayatana AppIndicator; sui desktop senza supporto alle icone, chiudere la finestra la riduce a icona nella barra applicazioni. Per terminare il processo scegli Chiudi Jase Tunnel nel pannello o nel menu.\n\nPer la diagnostica da terminale: ./jase-tunnel --headless --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
     mkdirSync(join(dir,"LICENSES"),{recursive:true});
     writeFileSync(join(dir,"LICENSES","purego.txt"),readFileSync(join(root,"third_party/purego-LICENSE")));
     writeFileSync(join(dir,"LICENSES","NOTICE.txt"),readFileSync(join(root,"THIRD_PARTY_NOTICES.md")));
-    const linux = `Jase-Linux-${name}.tar.gz`; run("tar", ["-czf", join(output, linux), "-C", join(temporary, `linux-${name}`), "Jase"]); record(`linux-${name}`, linux);
+    const linux = `Jase-Tunnel-Linux-${name}.tar.gz`; run("tar", ["-czf", join(output, linux), "-C", join(temporary, `linux-${name}`), "Jase-Tunnel"]); record(`linux-${name}`, linux);
   }
   const app = join(temporary, "Jase Tunnel.app"), contents = join(app, "Contents"), binary = join(contents, "MacOS", "Jase Tunnel"); mkdirSync(join(contents, "MacOS"), { recursive: true });
   const intel = join(temporary, "mac-intel"), arm = join(temporary, "mac-arm"); compile("darwin", "amd64", intel); compile("darwin", "arm64", arm); universal(intel, arm, binary);
   const resources = join(contents,"Resources"), iconSet = join(temporary,"Jase.iconset"); mkdirSync(resources,{recursive:true});
   await companionIcons(join(root,"assets/icon.svg"),resources,iconSet);
   run("/usr/bin/iconutil",["-c","icns",iconSet,"-o",join(resources,"Jase.icns")]);
-  writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>it.jaseengine.companion</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Collega i modelli locali alla tua scheda Jase.</string></dict></plist>`);
+  writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>io.github.strnozz.jase-tunnel</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Collega i modelli locali ai siti che autorizzi.</string></dict></plist>`);
   const signed = process.platform === "darwin";
   if (signed) {
     run("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", app]);
     run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]);
     // ditto keeps the bundle exactly as signed (the Apple-recommended archive for apps).
-    run("/usr/bin/ditto", ["-c", "-k", "--keepParent", app, join(output, "Jase-macOS.zip")]);
+    run("/usr/bin/ditto", ["-c", "-k", "--keepParent", app, join(output, "Jase-Tunnel-macOS.zip")]);
   } else {
     console.warn("Warning: Mac bundle not signed (codesign needs macOS); for local tests only.");
-    run("python3", ["-c", zip, app, join(output, "Jase-macOS.zip")]);
+    run("python3", ["-c", zip, app, join(output, "Jase-Tunnel-macOS.zip")]);
   }
-  record("macos-universal", "Jase-macOS.zip");
-  writeFileSync(join(output, "manifest.json"), JSON.stringify({ protocol: "jase-companion-v1", version, build, commit: revision, dirty, run: process.env.JASE_TUNNEL_RELEASE_RUN_URL ?? "local", signing: dev ? "development-loopback" : "development", macSigned: signed, artifacts }, null, 2) + "\n");
+  record("macos-universal", "Jase-Tunnel-macOS.zip");
+  writeFileSync(join(output, "manifest.json"), JSON.stringify({ protocol: "jase-tunnel-v1", version, build, commit: revision, dirty, run: process.env.JASE_TUNNEL_RELEASE_RUN_URL ?? "local", signing: dev ? "development-loopback" : "development", macSigned: signed, artifacts }, null, 2) + "\n");
   writeFileSync(join(output, "SHA256SUMS"), artifacts.map(a => `${a.sha256}  ${a.filename}`).join("\n") + "\n");
   console.log(`Built ${artifacts.length} downloads for Windows, macOS and Linux in ${output}`);
 } finally { rmSync(temporary, { recursive: true, force: true }); }

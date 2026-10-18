@@ -2,7 +2,7 @@
 
 Bozza di progetto 0.1 · 17 ottobre 2026 · identificatore proposto: `jase-tunnel-v1`.
 
-Questa è la specifica proposta. La versione 0.2 implementa scoperta, verifica di rete, ricevute, consenso nativo, collegamenti con modello fissato, broker/SDK e installatore Next.js; conserva `jase-companion-v1` separato. Sono ancora proposte le notifiche di sistema con silenziamento, l’estensione a framework non adattati e il collaudo completo della matrice browser. Non si dichiara ancora uno standard pubblico completo. I termini DEVE, NON DEVE e DOVREBBE indicano requisiti della proposta.
+Questa è la specifica proposta. La versione 0.3 implementa scoperta, annuncio automatico delle pagine, notifiche di sistema con limiti di frequenza, verifica di rete, ricevute, consenso nativo, collegamenti con modello fissato, broker/SDK e installatore per Next.js, Express e `node:http`. Il protocollo a sito singolo delle versioni precedenti è stato rimosso. Sono ancora proposte il silenziamento per sito, l’estensione ad altri framework e il collaudo completo della matrice browser. Non si dichiara ancora uno standard pubblico completo. I termini DEVE, NON DEVE e DOVREBBE indicano requisiti della proposta.
 
 ## 1. Esperienza dell’utente
 
@@ -11,7 +11,7 @@ Questa è la specifica proposta. La versione 0.2 implementa scoperta, verifica d
 1. L’app rimane in esecuzione e rileva i modelli locali disponibili.
 2. La pagina compatibile si annuncia al tunnel, quando il browser consente il contatto locale.
 3. Il tunnel verifica la dichiarazione del sito e mostra: «Questo sito supporta Jase Tunnel: piattaforma.example».
-4. L’utente sceglie «Collega» sulla pagina. L’app mostra il dominio verificato, i dati scambiati e il selettore del modello; l’utente conferma nell’app.
+4. L’utente sceglie «Collega» nella notifica oppure sulla pagina. L’app mostra il dominio verificato, i dati scambiati e il selettore del modello; l’utente conferma nell’app.
 5. Gli strumenti IA della piattaforma usano il modello scelto. Il pannello mostra i collegamenti attivi e permette di interromperli.
 
 Non occorre un account Jase Tunnel o un’estensione obbligatoria. La piattaforma conserva i propri requisiti di accesso: il tunnel non rende anonimo un servizio che richiede un account.
@@ -31,7 +31,7 @@ Pertanto l’esperienza automatica è garantibile **dopo il consenso richiesto d
 | Componente | Codice presente | Evoluzione necessaria |
 | --- | --- | --- |
 | Servizio locale | `main.go`, ascolto su `127.0.0.1:11439` | API di scoperta separate dalle operazioni autorizzate |
-| Origini | `allowedOrigin`, Jase in produzione e loopback in sviluppo | Verifica di siti HTTPS e autorizzazione esplicita per collegamento |
+| Origini | `webOrigin`: siti HTTPS pubblici, loopback solo nelle build di sviluppo | Silenziamento per sito |
 | Associazione | Ticket del browser scambiato dal tunnel con il server | Consenso nell’app, modello scelto, scadenza e revoca |
 | Trasporto | `protocol.go`, richieste in uscita al broker del sito | Profilo interoperabile e credenziali separate per sito e sessione |
 | Inferenza | `models.go`, Ollama e LM Studio locali | Applicazione dei limiti e del modello autorizzato a ogni turno |
@@ -39,7 +39,7 @@ Pertanto l’esperienza automatica è garantibile **dopo il consenso richiesto d
 | Interfaccia | AppKit su macOS, Win32 su Windows, GTK 3 su Linux | Elenco siti, notifiche e controlli di autorizzazione su tutti i sistemi supportati |
 | Riservatezza | Token e percorsi completi conservati localmente | Nessun inventario o identificatore di altri siti nelle nuove API |
 
-Il backend e il frontend Jase non sono inclusi in questa cartella. Anche Jase dovrà integrare la nuova scoperta e il nuovo broker.
+Il broker e il pannello web dei siti sono nel pacchetto `jase-tunnel` (`packages/sdk`); ogni sito li installa nel proprio server.
 
 ## 3. Componenti e responsabilità
 
@@ -129,8 +129,10 @@ POST /tunnel/v1/discover
 Origin: https://piattaforma.example
 Content-Type: application/json
 
-{"protocol":"jase-tunnel-v1"}
+{"protocol":"jase-tunnel-v1","announce":true}
 ```
+
+`announce` è facoltativo. Vale `true` quando la pagina si annuncia da sola durante la navigazione: se il sito risulta compatibile, il tunnel può notificarlo all’utente. Senza `announce` la richiesta segue un clic dell’utente sul pulsante della pagina, che prosegue subito verso il consenso; il tunnel non mostra una notifica superflua.
 
 Il tunnel prende il sito esclusivamente dall’header `Origin` verificato. Risponde `202` con:
 
@@ -158,15 +160,15 @@ Authorization: Bearer <receipt>
 
 La risposta `200` contiene `protocol`, `discoveryId`, `expiresAt` e `state`. Dopo il collegamento può contenere esclusivamente il `connectionId` di questa associazione. Non restituisce nomi dei modelli, file, registro, credenziali del dispositivo o altre connessioni.
 
-Stati: `verifying`, `compatible`, `awaiting_approval`, `connecting`, `connected`, `incompatible`, `rejected`, `failed`, `expired`. `compatible` indica il superamento della verifica statica; il broker sarà verificato durante l’associazione. Gli stati terminali sono `connected`, `incompatible`, `rejected`, `failed` ed `expired`. Una ricevuta scaduta o sconosciuta produce `410 discovery_expired`; una ricevuta di un’altra origine produce `403 origin_mismatch` senza esporre dati.
+Stati: `verifying`, `compatible`, `requested`, `awaiting_approval`, `connecting`, `connected`, `incompatible`, `rejected`, `failed`, `expired`. `compatible` indica il superamento della verifica statica; il broker sarà verificato durante l’associazione. `requested` indica che l’utente ha scelto «Collega» nella notifica: la pagina in attesa prosegue con l’associazione come dopo un clic sul proprio pulsante. Gli stati terminali sono `connected`, `incompatible`, `rejected`, `failed` ed `expired`. Una ricevuta scaduta o sconosciuta produce `410 discovery_expired`; una ricevuta di un’altra origine produce `403 origin_mismatch` senza esporre dati.
 
-Il client interroga lo stato al massimo una volta ogni due secondi, interrompe le interrogazioni a uno stato terminale o alla scadenza e le sospende quando la pagina è nascosta. Non inserisce segreti in URL, log o archiviazione persistente del browser.
+Il client interroga lo stato al massimo una volta ogni due secondi, interrompe le interrogazioni a uno stato terminale o alla scadenza e le sospende quando la pagina è nascosta. Non inserisce segreti in URL, log o archiviazione persistente del browser. Per non ripetere l’annuncio a ogni pagina dello stesso sito, conserva la ricevuta nel `sessionStorage` della scheda fino alla sua scadenza.
 
 ### Notifiche
 
-L’app DEVE conservare una voce nel pannello anche quando le notifiche di sistema sono disabilitate. Il clic sulla notifica apre quel pannello e non concede permessi. Il pannello invita a tornare alla pagina per iniziare il collegamento.
+L’app DEVE conservare una voce nel pannello anche quando le notifiche di sistema sono disabilitate. La notifica è mostrata solo per le richieste con `announce`. Il clic su «Collega» porta la ricevuta allo stato `requested` e non concede permessi: la pagina ancora aperta chiede il ticket al proprio server e l’app mostra il consenso. Se la pagina non è più aperta, il pannello invita a tornarci.
 
-La prima revisione prevede al massimo una notifica per origine ogni 24 ore e tre notifiche di scoperta ogni dieci minuti in totale. Le scoperte successive aggiornano il pannello senza ulteriori notifiche. L’utente può silenziare un sito e disattivare tutte le notifiche. Il tunnel non carica icone o altre risorse remote per comporre l’avviso.
+La prima revisione prevede al massimo una notifica per origine ogni 24 ore e tre notifiche di scoperta ogni dieci minuti in totale, e nessuna notifica per un sito già collegato. Le scoperte successive aggiornano il pannello senza ulteriori notifiche. L’utente disattiva le notifiche dalle impostazioni del sistema; il silenziamento per sito resta da implementare. Il tunnel non carica icone o altre risorse remote per comporre l’avviso.
 
 Un annuncio non riattiva un collegamento interrotto o revocato. Le notifiche sono una funzione locale: il sito non riceve informazioni sul fatto che l’utente le abbia lette.
 
@@ -307,17 +309,17 @@ Un sito aderisce pubblicando il manifest, integrando il client web e implementan
 
 Ordine di implementazione:
 
-1. **Contratti condivisi:** schemi JSON del manifest e dei messaggi, fixture valide e non valide, mini broker e pagina di esempio senza dipendenze da Jase.
+1. **Contratti condivisi:** schemi JSON del manifest e dei messaggi, fixture valide e non valide, mini broker e pagina di esempio.
 2. **Scoperta:** verifica sicura delle origini, nuove API locali, ricevute, limiti e stato nel pannello; nessuna apertura delle API attuali.
 3. **Consenso e notifiche:** scelta del modello, concessioni con scadenza, pannello dei siti, rifiuto, silenziamento e revoca; interfacce equivalenti sui sistemi dichiarati supportati.
 4. **Trasporto:** broker configurabile per concessione, controllo del modello a ogni turno, annullamento per singolo collegamento, scadenza e revoca immediata.
-5. **SDK e adozione:** client web, integrazione Jase e seconda piattaforma indipendente, documentazione per integratori e matrice di compatibilità effettivamente verificata.
+5. **SDK e adozione:** client web, installatore per i framework più diffusi, due piattaforme indipendenti, documentazione per integratori e matrice di compatibilità effettivamente verificata.
 
-`jase-companion-v1` conserva un percorso separato durante la transizione. Le sue credenziali non diventano automaticamente concessioni del nuovo protocollo. Il supporto legacy va presentato nel pannello e può essere disattivato; le nuove origini non accedono ai suoi endpoint. Una futura modifica incompatibile usa un nuovo identificatore di protocollo.
+Il protocollo a sito singolo delle versioni 0.2 e precedenti non esiste più: all’avvio il tunnel scarta le sue credenziali e i suoi endpoint locali rispondono `404`. Una futura modifica incompatibile usa un nuovo identificatore di protocollo.
 
 ### Criteri di accettazione
 
-- Una piattaforma diversa da Jase viene riconosciuta senza modificare o ricompilare l’app.
+- Una piattaforma qualsiasi viene riconosciuta senza modificare o ricompilare l’app.
 - L’app avvisa e mostra il dominio anche con modello assente o notifiche di sistema disabilitate.
 - Prima della conferma non partono inferenze e non viene inviato un inventario di modelli.
 - Due piattaforme e due sessioni della stessa piattaforma hanno credenziali, modelli e stato isolati.

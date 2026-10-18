@@ -1,4 +1,5 @@
-// Jase's desktop companion. No cloud SDK or outside relay.
+// Jase Tunnel: connects a model running on this computer to the websites that adopt the
+// jase-tunnel-v1 module, after the person's consent. No cloud SDK or outside relay.
 package main
 
 import (
@@ -13,7 +14,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,16 +26,15 @@ import (
 	"time"
 )
 
-const protocol = "jase-companion-v1"
-
 var version = "dev"
 
 // Loopback site origins (http://localhost:3000 …) are for development builds only
-// (`npm run build:dev` sets this through -ldflags). A release accepts only https://jaseengine.it:
-// otherwise any local web page could pair the app to a server of its own and use the models.
+// (`npm run build:dev` sets this through -ldflags). A release accepts only public HTTPS
+// sites: otherwise any local web page could pair the app to a server of its own.
 // No runtime flag can turn a release into a development build.
 var devBuild = "false"
 
+// A site's grant, pinned to one model and short-lived (see answerWebConsent).
 type link struct {
 	Protocol     string `json:"protocol,omitempty"`
 	Broker       string `json:"broker,omitempty"`
@@ -46,8 +45,7 @@ type link struct {
 	ConnectionID string `json:"connectionId"`
 }
 type settings struct {
-	Links   []link `json:"links"`
-	Browser string `json:"browser,omitempty"`
+	Links []link `json:"links"`
 }
 type application struct {
 	mu        sync.RWMutex
@@ -56,25 +54,23 @@ type application struct {
 	files     []modelFile
 	stateDir  string
 	port      int
-	client    *http.Client
 	ctx       context.Context
 	cancel    context.CancelFunc
 	running   map[string]bool
 	inference chan struct{}
-	paired    chan struct{}
-	pairOnce  sync.Once
 	importMu  sync.Mutex
-	// --debug: full log (prompts, thinking, replies, every call to Jase); --think: let
-	// models that can reason do it; site: the page the app opens.
+	// --debug: full log (prompts, thinking, replies, every call to a site); --think: let
+	// models that can reason do it.
 	debug    atomic.Bool
 	think    atomic.Bool
-	site     string
 	activity activityLog
 	nativeUI bool
 	web      *webManager
 	runs     map[string]context.CancelFunc
 	webHTTP  *http.Client
-	// LM Studio instance loaded by Jase for each model name (see studioInstance).
+	// Shows a native notification (notifyDesktop with the panel; none in headless mode).
+	notify func(id, title, body string)
+	// LM Studio instance loaded by Jase Tunnel for each model name (see studioInstance).
 	studioLoaded map[string]string
 }
 
@@ -83,88 +79,74 @@ func main() {
 	background := flag.Bool("background", false, "Internal background process")
 	state := flag.String("state-dir", "", "Private application state directory")
 	port := flag.Int("port", 11439, "Loopback service port")
-	noBrowser := flag.Bool("no-browser", false, "Do not show a browser picker")
-	debug := flag.Bool("debug", false, "Log prompts, model thinking, replies and every call to Jase (local diagnostics)")
+	debug := flag.Bool("debug", false, "Log prompts, model thinking, replies and every call to a site (local diagnostics)")
 	think := flag.Bool("think", false, "Let models that declare the thinking capability reason before answering")
-	dev := flag.Bool("dev", false, "Development builds only: accepted for compatibility, a release refuses it")
-	site := flag.String("site", "https://jaseengine.it", "Jase site opened by the app")
 	headless := flag.Bool("headless", false, "Run without the desktop interface (explicit terminal diagnostics only)")
 	flag.Parse()
+	desktop := desktopAvailable && !*headless
+	failure := func(message string) {
+		if desktop {
+			desktopStartupError(message)
+		} else {
+			log.Print(message)
+		}
+	}
 	if runtime.GOOS == "darwin" && !*headless && !desktopAvailable {
 		log.Print("The macOS app requires AppKit: build on macOS with CGO_ENABLED=1, or use --headless for diagnostics")
 		return
 	}
-	if desktopAvailable && !*headless {
+	if desktop {
 		if err := prepareDesktopUI(); err != nil {
 			desktopStartupError(err.Error())
 			return
 		}
 	}
-	if *dev && devBuild != "true" {
-		message := "Questa versione di Jase Tunnel non accetta --dev. Per i siti in localhost usa una build di sviluppo (npm run build:dev)."
-		if desktopAvailable && !*headless {
-			desktopStartupError(message)
-		} else {
-			log.Print(message)
-		}
-		return
-	}
-	if devBuild == "true" {
-		explicitSite := false
-		flag.Visit(func(f *flag.Flag) { explicitSite = explicitSite || f.Name == "site" })
-		if !explicitSite {
-			*site = "http://localhost:3000"
-		}
-	}
-	if !allowedOrigin(*site) {
-		log.Print("Invalid --site (use https://jaseengine.it, or a localhost address with --dev)")
-		return
-	}
 	if *state == "" {
 		base, err := os.UserConfigDir()
 		if err != nil {
+			failure("Cartella di configurazione dell’utente non disponibile.")
 			return
 		}
-		*state = filepath.Join(base, "Jase")
+		*state = filepath.Join(base, "Jase Tunnel")
 	}
 	if err := os.MkdirAll(*state, 0700); err != nil {
+		failure("Impossibile creare la cartella privata di Jase Tunnel: " + err.Error())
 		return
 	}
-	if !*foreground && !*background && !(desktopAvailable && !*headless) {
+	if !*foreground && !*background && !desktop {
 		executable, err := os.Executable()
 		if err != nil {
+			log.Print("Unable to locate the Jase Tunnel executable")
 			return
 		}
-		file, err := os.OpenFile(filepath.Join(*state, "companion.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		file, err := os.OpenFile(filepath.Join(*state, "jase-tunnel.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
+			log.Print("Unable to open the Jase Tunnel log")
 			return
 		}
 		defer file.Close()
 		args := []string{"--background", "--state-dir", *state, "--port", fmt.Sprint(*port)}
-		if *noBrowser {
-			args = append(args, "--no-browser")
-		}
 		if *headless {
 			args = append(args, "--headless")
 		}
-		for name, on := range map[string]bool{"--debug": *debug, "--think": *think, "--dev": *dev} {
+		for name, on := range map[string]bool{"--debug": *debug, "--think": *think} {
 			if on {
 				args = append(args, name)
 			}
 		}
-		args = append(args, "--site", *site)
 		command := exec.Command(executable, args...)
 		command.Stdout = file
 		command.Stderr = file
 		detach(command)
 		if err := command.Start(); err != nil {
-			log.Print("Unable to start Jase")
+			log.Print("Unable to start Jase Tunnel")
 		}
 		return
 	}
 	if !*foreground {
-		file, err := os.OpenFile(filepath.Join(*state, "companion.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		file, err := os.OpenFile(filepath.Join(*state, "jase-tunnel.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
+			failure("Impossibile aprire il registro di Jase Tunnel: " + err.Error())
 			return
 		}
 		defer file.Close()
@@ -172,14 +154,16 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	app := &application{stateDir: *state, port: *port, ctx: ctx, cancel: cancel, running: map[string]bool{}, inference: make(chan struct{}, 1), paired: make(chan struct{}), site: *site, nativeUI: desktopAvailable && !*headless}
+	app := &application{stateDir: *state, port: *port, ctx: ctx, cancel: cancel, running: map[string]bool{}, inference: make(chan struct{}, 1), nativeUI: desktop}
+	if desktop {
+		app.notify = notifyDesktop
+	}
 	app.debug.Store(*debug)
 	app.think.Store(*think)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 	if *debug {
 		log.Print("Log completo attivo (--debug): prompt, thinking e risposte vengono scritti qui.")
 	}
-	app.client = &http.Client{Timeout: 25 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
@@ -192,10 +176,11 @@ func main() {
 	} // An existing app keeps its connections.
 	if bytes, err := os.ReadFile(filepath.Join(*state, "connections.json")); err == nil {
 		if err := json.Unmarshal(bytes, &app.settings); err != nil {
-			log.Print("Private settings could not be read")
+			failure("Le impostazioni private di Jase Tunnel non sono leggibili.")
 			return
 		}
 	}
+	app.dropInvalidLinks()
 	go func() {
 		app.refreshModels()
 		if ctx.Err() != nil {
@@ -205,27 +190,10 @@ func main() {
 		connections := append([]link{}, app.settings.Links...)
 		app.mu.RUnlock()
 		for _, connection := range connections {
-			if allowedOrigin(connection.Origin) && connection.Protocol == "" || validWebLink(connection) {
-				app.startLink(connection)
-			}
+			app.startLink(connection)
 		}
 		app.watchModels()
 	}()
-	if !*noBrowser && !app.nativeUI {
-		go func() {
-			select {
-			case <-time.After(12 * time.Second):
-				app.mu.RLock()
-				paired := len(app.settings.Links) > 0
-				app.mu.RUnlock()
-				if !paired {
-					app.openJase()
-				}
-			case <-app.paired:
-			case <-ctx.Done():
-			}
-		}()
-	}
 	server := &http.Server{Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, MaxHeaderBytes: 8192}
 	shutdownDone := make(chan struct{})
 	go func() {
@@ -240,8 +208,8 @@ func main() {
 		}
 		close(shutdownDone)
 	}()
-	log.Printf("Jase %s ready on loopback port %d", version, *port)
-	app.record("app", "info", "Jase Tunnel avviato", "Chiudi Jase Tunnel termina anche il servizio locale.")
+	log.Printf("Jase Tunnel %s ready on loopback port %d", version, *port)
+	app.record("app", "info", "Jase Tunnel avviato", "Le pagine compatibili si annunciano mentre navighi. Chiudi Jase Tunnel termina anche il servizio locale.")
 	go func() {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Print("Local service stopped")
@@ -257,22 +225,29 @@ func main() {
 	<-shutdownDone
 }
 
+// Only unexpired grants of the current protocol survive a restart. Connections saved by
+// releases before 0.3 belonged to a single site and are discarded with their tokens.
+func (a *application) dropInvalidLinks() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	kept := []link{}
+	for _, c := range a.settings.Links {
+		if validWebLink(c) {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) != len(a.settings.Links) {
+		a.settings.Links = kept
+		_ = a.saveLocked()
+	}
+}
+
 func randomSecret() string {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		panic(err)
 	}
 	return hex.EncodeToString(bytes)
-}
-func allowedOrigin(value string) bool {
-	u, err := url.Parse(value)
-	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
-		return false
-	}
-	if value == "https://jaseengine.it" {
-		return true
-	}
-	return devBuild == "true" && u.Scheme == "http" && (u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost" || u.Hostname() == "::1") && u.Port() != ""
 }
 func respond(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -306,22 +281,12 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		a.serveWeb(w, r)
 		return
 	}
+	// Everything else manages the app itself: only its status page (under either Host
+	// name accepted above) or a local process without a browser Origin may use it.
+	// Websites reach the tunnel exclusively through /tunnel/v1/.
 	origin := r.Header.Get("Origin")
-	// The status page is reachable under both Host names accepted above.
-	localOrigin := origin == fmt.Sprintf("http://127.0.0.1:%d", a.port) || origin == fmt.Sprintf("http://localhost:%d", a.port)
-	if origin != "" && !allowedOrigin(origin) && !localOrigin {
-		fail(w, 403, "Apri questo collegamento dal sito Jase.")
-		return
-	}
-	if origin != "" {
-		w.Header().Set("Access-Control-Allow-Origin", origin)
-		w.Header().Set("Vary", "Origin")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Private-Network", "true")
-	}
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(204)
+	if origin != "" && origin != fmt.Sprintf("http://127.0.0.1:%d", a.port) && origin != fmt.Sprintf("http://localhost:%d", a.port) {
+		fail(w, 403, "Richiesta locale non consentita.")
 		return
 	}
 	if r.URL.Path == "/" && r.Method == "GET" {
@@ -331,21 +296,15 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/status" && r.Method == "GET" {
 		a.mu.RLock()
 		count := len(a.models)
-		files := append([]modelFile{}, a.files...)
-		connectionIDs := []string{}
-		for _, c := range a.settings.Links {
-			if c.Protocol == "" {
-				connectionIDs = append(connectionIDs, c.ConnectionID)
-			}
-		}
 		a.mu.RUnlock()
 		ui := ""
 		if a.nativeUI {
 			ui = desktopUIName
 		}
-		respond(w, 200, map[string]any{"protocol": protocol, "version": version, "modelCount": count, "files": files, "connectionIds": connectionIDs, "desktop": a.nativeUI, "desktopUI": ui, "development": devBuild == "true"})
+		respond(w, 200, map[string]any{"protocol": webProtocol, "version": version, "modelCount": count, "desktop": a.nativeUI, "desktopUI": ui, "development": devBuild == "true"})
 		return
 	}
+	// State changes need the page's Origin and JSON: a cross-site form can send neither.
 	if r.Method != "POST" || origin == "" || !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		fail(w, 403, "Richiesta locale non consentita.")
 		return
@@ -357,47 +316,6 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		showDesktopUI()
-		respond(w, 200, map[string]bool{"ok": true})
-	case "/v1/pair":
-		var input struct {
-			Ticket string `json:"ticket"`
-			Origin string `json:"origin"`
-		}
-		if decode(w, r, &input, 4096) != nil || len(input.Ticket) != 64 || input.Origin != origin || !allowedOrigin(input.Origin) || localOrigin {
-			fail(w, 400, "Collegamento non valido.")
-			return
-		}
-		a.mu.RLock()
-		models := append([]model{}, a.models...)
-		a.mu.RUnlock()
-		name := "Il mio computer"
-		var result struct {
-			Protocol     string `json:"protocol"`
-			Token        string `json:"token"`
-			ConnectionID string `json:"connectionId"`
-		}
-		err := a.remote(r.Context(), link{Origin: input.Origin}, "pair", map[string]any{"ticket": input.Ticket, "label": name, "models": models}, &result)
-		if err != nil || result.Protocol != protocol || len(result.Token) != 64 {
-			fail(w, 502, "Collegamento a Jase non riuscito. Riprova dalla pagina.")
-			return
-		}
-		connection := link{Origin: input.Origin, Token: result.Token, ConnectionID: result.ConnectionID}
-		a.mu.Lock()
-		if len(a.settings.Links) >= 20 {
-			a.mu.Unlock()
-			fail(w, 409, "Troppi browser collegati. Usa «Scollega siti» nel pannello di Jase Tunnel, poi riprova.")
-			return
-		}
-		a.settings.Links = append(a.settings.Links, connection)
-		err = a.saveLocked()
-		a.mu.Unlock()
-		if err != nil {
-			fail(w, 500, "Impossibile conservare il collegamento sul computer.")
-			return
-		}
-		a.pairOnce.Do(func() { close(a.paired) })
-		a.startLink(connection)
-		a.record("app", "info", "Browser collegato a Jase", connection.Origin)
 		respond(w, 200, map[string]bool{"ok": true})
 	case "/v1/add-model":
 		var input struct {
@@ -417,44 +335,6 @@ func (a *application) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.refreshModels()
-		a.publishModels()
-		respond(w, 200, map[string]bool{"ok": true})
-	case "/v1/open-jase":
-		a.openJase()
-		respond(w, 200, map[string]bool{"ok": true})
-	case "/v1/import-model":
-		var input struct {
-			ID string `json:"id"`
-		}
-		if decode(w, r, &input, 1024) != nil {
-			fail(w, 400, "Modello non valido.")
-			return
-		}
-		if !a.importMu.TryLock() {
-			fail(w, 409, "Un’importazione è già aperta.")
-			return
-		}
-		defer a.importMu.Unlock()
-		a.mu.RLock()
-		var chosen *modelFile
-		for _, candidate := range a.files {
-			if candidate.ID == input.ID {
-				copy := candidate
-				chosen = &copy
-				break
-			}
-		}
-		a.mu.RUnlock()
-		if chosen == nil {
-			fail(w, 404, "Modello non trovato nei percorsi locali.")
-			return
-		}
-		if err := a.importModelAt(r.Context(), chosen.Path, chosen.Folder); err != nil {
-			fail(w, 400, err.Error())
-			return
-		}
-		a.refreshModels()
-		a.publishModels()
 		respond(w, 200, map[string]bool{"ok": true})
 	case "/v1/quit":
 		respond(w, 200, map[string]bool{"ok": true})

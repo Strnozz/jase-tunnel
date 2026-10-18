@@ -60,7 +60,7 @@ jobs:
           node --input-type=module <<'JS'
           import { writeFileSync } from 'node:fs';
           const development=process.env.JASE_TUNNEL_RELEASE_TAG.startsWith('dev-');
-          writeFileSync('.deploy-check/release-notes.md', `Jase Tunnel per Windows, macOS e Linux.\n\n${development ? 'Versione per localhost; non destinata al sito di produzione.' : 'Versione per il sito di produzione.'}\n\nCommit: ${process.env.JASE_TUNNEL_RELEASE_COMMIT}\nBuild: ${process.env.JASE_TUNNEL_RELEASE_RUN_URL}\n\nSHA256SUMS contiene le impronte degli eseguibili.\n`);
+          writeFileSync('.deploy-check/release-notes.md', `Jase Tunnel per Windows, macOS e Linux.\n\n${development ? 'Versione di sviluppo: accetta anche siti in localhost.' : 'Versione per i siti HTTPS pubblici.'}\n\nCommit: ${process.env.JASE_TUNNEL_RELEASE_COMMIT}\nBuild: ${process.env.JASE_TUNNEL_RELEASE_RUN_URL}\n\nSHA256SUMS contiene le impronte degli eseguibili.\n`);
           JS
           if [ "$draft" != true ]; then
             gh release create "$JASE_TUNNEL_RELEASE_TAG" --verify-tag --target "$JASE_TUNNEL_RELEASE_COMMIT" --draft --title "Jase Tunnel $JASE_TUNNEL_RELEASE_TAG" --notes-file .deploy-check/release-notes.md
