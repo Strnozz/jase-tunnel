@@ -394,7 +394,7 @@ func (p *linuxPanel) refresh() {
 	defer func() { p.updating = false }()
 	if approval := p.a.claimWebApproval(); approval != nil {
 		d := gtk.GtkDialogNew()
-		gtk.GtkWindowSetTitle(d, "Collega sito a Jase Tunnel")
+		gtk.GtkWindowSetTitle(d, "Collegare "+approval.Site+" a Jase Tunnel?")
 		gtk.GtkWindowSetModal(d, 1)
 		gtk.GtkWindowSetTransientFor(d, p.window)
 		area := gtk.GtkDialogGetContentArea(d)
@@ -495,7 +495,7 @@ func (a *application) runDesktopUI() {
 	buttons := gtk.GtkBoxNew(0, 10)
 	gtkPack(root, buttons, false)
 	gtkButton(buttons, "Apri Jase", func() { go a.openJase() })
-	gtkButton(buttons, "Scollega siti", func() { go a.revokeWebLinks() })
+	gtkButton(buttons, "Scollega siti", func() { go a.revokeLinks() })
 	p.add = gtkButton(buttons, "Aggiungi pesi…", p.chooseWeights)
 	gtkButton(buttons, trayLabels[2], a.cancel)
 	tabs := gtk.GtkNotebookNew()

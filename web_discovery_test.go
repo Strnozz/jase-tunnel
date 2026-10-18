@@ -137,6 +137,9 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	if approval == nil || len(approval.Models) != 1 {
 		t.Fatal("no native consent request")
 	}
+	if approval.Site != "shop.example.com" || !strings.HasPrefix(approval.Text, "Indirizzo verificato: shop.example.com\n") {
+		t.Fatalf("consent does not lead with the verified address: %q", approval.Text)
+	}
 	if a.claimWebApproval() != nil {
 		t.Fatal("consent shown twice")
 	}
@@ -148,16 +151,23 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	if len(links) != 1 || links[0].Model.Key != "ollama:fixture" {
 		t.Fatal("model grant missing")
 	}
+	// «Scollega siti» also removes Jase's own links and stops their inferences.
 	active, cancel := context.WithCancel(context.Background())
+	legacyActive, legacyCancel := context.WithCancel(context.Background())
+	legacy := link{Origin: "https://jaseengine.it", Token: strings.Repeat("d", 64), ConnectionID: "legacy"}
 	a.mu.Lock()
-	a.webRuns = map[string]context.CancelFunc{links[0].Token: cancel}
+	a.settings.Links = append(a.settings.Links, legacy)
+	a.runs = map[string]context.CancelFunc{links[0].Token: cancel, legacy.Token: legacyCancel}
 	a.mu.Unlock()
-	a.revokeWebLinks()
+	if !a.linkStored(legacy) {
+		t.Fatal("saved Jase link not recognised")
+	}
+	a.revokeLinks()
 	a.mu.RLock()
 	remaining := len(a.settings.Links)
 	a.mu.RUnlock()
-	if active.Err() == nil || remaining != 0 {
-		t.Fatal("revocation did not cancel active inference")
+	if active.Err() == nil || legacyActive.Err() == nil || remaining != 0 || a.linkStored(legacy) {
+		t.Fatal("revocation did not remove every link and cancel active inference")
 	}
 	a.cancel()
 }

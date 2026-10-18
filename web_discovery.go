@@ -42,10 +42,14 @@ type webManager struct {
 	count    int
 	checking int
 }
+
+// Site is the verified address shown first; Name comes from the site's own manifest.
 type webApproval struct {
 	ID     string  `json:"id"`
 	Origin string  `json:"origin"`
+	Site   string  `json:"site"`
 	Name   string  `json:"name"`
+	Text   string  `json:"text"`
 	Models []model `json:"models"`
 }
 
@@ -291,12 +295,17 @@ func (a *application) claimWebApproval() *webApproval {
 		}
 		a.mu.RUnlock()
 		d.Shown = true
-		return &webApproval{ID: d.ID, Origin: d.Origin, Name: d.Name, Models: models}
+		approval := &webApproval{ID: d.ID, Origin: d.Origin, Site: strings.TrimPrefix(d.Origin, "https://"), Name: d.Name, Models: models}
+		approval.Text = webConsentText(approval)
+		return approval
 	}
 	return nil
 }
+
+// Any site can call itself "Jase" in its manifest: the verified address leads, the
+// declared name is labelled as the site's own claim.
 func webConsentText(p *webApproval) string {
-	return p.Name + "\n" + p.Origin + "\n\nIl sito invierà messaggi e dati al modello scelto. Risposte e richieste di strumenti torneranno al server del sito. I pesi restano sul computer. Il collegamento dura al massimo 30 minuti.\n\nConsenti soltanto se riconosci il sito."
+	return "Indirizzo verificato: " + p.Site + "\nNome dichiarato dal sito (non verificato): " + p.Name + "\n\nIl sito invierà messaggi e dati al modello scelto. Risposte e richieste di strumenti torneranno al server del sito. I pesi restano sul computer. Il collegamento dura al massimo 30 minuti.\n\nConsenti soltanto se riconosci l’indirizzo " + p.Site + "."
 }
 func (a *application) answerWebConsent(id, key string) {
 	m := a.webManager()
@@ -388,20 +397,17 @@ func (a *application) answerWebConsent(id, key string) {
 	a.record("app", "info", "Sito collegato al modello scelto", grant.Origin+" · "+chosen.Name)
 	a.startLink(grant)
 }
-func (a *application) revokeWebLinks() {
+
+// «Scollega siti» removes every link, Jase's own included, and stops their inferences.
+// Their poll loops end at the next check; the site can pair again from its page.
+func (a *application) revokeLinks() {
 	a.mu.Lock()
-	kept := []link{}
 	for _, c := range a.settings.Links {
-		if c.Protocol == webProtocol {
-			if cancel := a.webRuns[c.Token]; cancel != nil {
-				cancel()
-			}
-		}
-		if c.Protocol != webProtocol {
-			kept = append(kept, c)
+		if cancel := a.runs[c.Token]; cancel != nil {
+			cancel()
 		}
 	}
-	a.settings.Links = kept
+	a.settings.Links = []link{}
 	_ = a.saveLocked()
 	a.mu.Unlock()
 	m := a.webManager()
@@ -411,7 +417,7 @@ func (a *application) revokeWebLinks() {
 		d.Ticket = ""
 	}
 	m.mu.Unlock()
-	a.record("app", "info", "Siti scollegati", "I collegamenti del protocollo web sono stati revocati.")
+	a.record("app", "info", "Siti scollegati", "Tutti i collegamenti sono stati revocati e le inferenze in corso annullate.")
 }
 func (a *application) webGrantActive(c link) bool {
 	if c.Protocol != webProtocol {

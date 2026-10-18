@@ -248,8 +248,8 @@ static NSView *JaseSpacer(void) {
         char *rawApproval=jaseDesktopApproval();NSData *approvalData=[[NSString stringWithUTF8String:rawApproval] dataUsingEncoding:NSUTF8StringEncoding];free(rawApproval);
         id approval=[NSJSONSerialization JSONObjectWithData:approvalData options:NSJSONReadingFragmentsAllowed error:nil];
         if([approval isKindOfClass:NSDictionary.class]){
-            self.consenting=YES;[self showPanel:nil];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=@"Collega questo sito al tuo modello?";
-            alert.informativeText=[NSString stringWithFormat:@"%@\n%@\n\nIl sito invierà messaggi e dati al modello. Risposte e richieste di strumenti torneranno al suo server. I pesi restano sul computer. Il collegamento dura al massimo 30 minuti.",approval[@"name"],approval[@"origin"]];
+            self.consenting=YES;[self showPanel:nil];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=[NSString stringWithFormat:@"Collegare %@ al tuo modello?",approval[@"site"]];
+            alert.informativeText=approval[@"text"];
             NSPopUpButton *models=[[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,30) pullsDown:NO] autorelease];
             for(NSDictionary *model in approval[@"models"])[models addItemWithTitle:model[@"name"]];alert.accessoryView=models;
             NSButton *allow=[alert addButtonWithTitle:@"Consenti con questo modello"];allow.enabled=[approval[@"models"] count]>0;[alert addButtonWithTitle:@"Rifiuta"];

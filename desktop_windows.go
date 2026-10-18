@@ -236,7 +236,7 @@ func (p *windowsPanel) command(id, notification int) {
 	case idQuit:
 		p.a.cancel()
 	case idRevoke:
-		go p.a.revokeWebLinks()
+		go p.a.revokeLinks()
 	case idOpenSite:
 		go p.a.openJase()
 	case idModels:

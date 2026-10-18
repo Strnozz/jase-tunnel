@@ -179,7 +179,7 @@ func (a *application) startLink(c link) {
 	go func() {
 		defer func() { a.mu.Lock(); delete(a.running, c.Token); a.mu.Unlock() }()
 		for a.ctx.Err() == nil {
-			if c.Protocol == webProtocol && !a.webGrantActive(c) {
+			if !a.linkStored(c) {
 				a.forget(c.Token)
 				return
 			}
@@ -189,6 +189,10 @@ func (a *application) startLink(c link) {
 			err := a.remote(a.ctx, c, "poll", nil, &response)
 			if errors.Is(err, unauthorized) {
 				a.forget(c.Token)
+				return
+			}
+			// «Scollega siti» may have removed the link while the long poll was waiting.
+			if !a.linkStored(c) {
 				return
 			}
 			if err != nil {
@@ -217,6 +221,25 @@ func (a *application) forget(token string) {
 	a.settings.Links = kept
 	_ = a.saveLocked()
 }
+
+// linkStored reports whether the person still keeps this link: a web grant must also
+// be unexpired, a Jase link must still be among the saved connections.
+func (a *application) linkStored(c link) bool {
+	if c.Protocol == webProtocol {
+		return a.webGrantActive(c)
+	}
+	if !allowedOrigin(c.Origin) {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, stored := range a.settings.Links {
+		if stored.Protocol == "" && stored.Token == c.Token {
+			return true
+		}
+	}
+	return false
+}
 func (a *application) handleTask(c link, t task) {
 	if c.Protocol == webProtocol && (!a.webGrantActive(c) || !validWebTask(c, t)) {
 		a.record("model", "error", "Turno rifiutato", "Il server ha richiesto un modello o limiti diversi dal consenso.")
@@ -239,15 +262,13 @@ func (a *application) handleTask(c link, t task) {
 	}
 	ctx, cancel := context.WithDeadline(a.ctx, deadline)
 	defer cancel()
-	if c.Protocol == webProtocol {
-		a.mu.Lock()
-		if a.webRuns == nil {
-			a.webRuns = map[string]context.CancelFunc{}
-		}
-		a.webRuns[c.Token] = cancel
-		a.mu.Unlock()
-		defer func() { a.mu.Lock(); delete(a.webRuns, c.Token); a.mu.Unlock() }()
+	a.mu.Lock()
+	if a.runs == nil {
+		a.runs = map[string]context.CancelFunc{}
 	}
+	a.runs[c.Token] = cancel
+	a.mu.Unlock()
+	defer func() { a.mu.Lock(); delete(a.runs, c.Token); a.mu.Unlock() }()
 	// Stop local inference when the browser cancels, a server task expires, or Jase
 	// becomes unreachable. A request can never turn into detached background work.
 	// One failed check is a network blip, not a cancellation: stop only on Jase's answer

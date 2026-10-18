@@ -227,7 +227,10 @@ func studioModels(ctx context.Context) []model {
 
 // Chat Completions cannot choose its context length. Reuse a sufficient loaded
 // instance, or load this already-installed model locally with the task's budget.
-func studioInstance(ctx context.Context, name string, contextTokens int) (string, error) {
+// owned is the instance Jase loaded earlier for this model: a larger load replaces it,
+// so memory holds at most one Jase instance per model. Instances the person loaded in
+// LM Studio are never unloaded. loaded reports whether the returned instance is new.
+func studioInstance(ctx context.Context, name string, contextTokens int, owned string) (id string, loaded bool, err error) {
 	var list struct {
 		Models []struct {
 			Key       string `json:"key"`
@@ -240,9 +243,9 @@ func studioInstance(ctx context.Context, name string, contextTokens int) (string
 		} `json:"models"`
 	}
 	if err := localJSON(ctx, studioURL, "/api/v1/models", nil, &list, 1000000); err != nil {
-		return "", err
+		return "", false, err
 	}
-	found := false
+	found, ownedLoaded := false, false
 	for _, m := range list.Models {
 		if m.Key != name {
 			continue
@@ -250,44 +253,57 @@ func studioInstance(ctx context.Context, name string, contextTokens int) (string
 		found = true
 		for _, instance := range m.Instances {
 			if instance.ID != "" && instance.Config.Context >= contextTokens {
-				return instance.ID, nil
+				return instance.ID, false, nil
 			}
+			ownedLoaded = ownedLoaded || owned != "" && instance.ID == owned
 		}
 	}
 	if !found {
-		return "", errors.New("model no longer installed")
+		return "", false, errors.New("model no longer installed")
 	}
-	var loaded struct {
+	if ownedLoaded {
+		var unloaded struct {
+			ID string `json:"instance_id"`
+		}
+		if err := localJSON(ctx, studioURL, "/api/v1/models/unload", map[string]any{"instance_id": owned}, &unloaded, 16000); err != nil {
+			return "", false, err
+		}
+	}
+	var load struct {
 		ID     string `json:"instance_id"`
 		Status string `json:"status"`
 		Config struct {
 			Context int `json:"context_length"`
 		} `json:"load_config"`
 	}
-	err := localJSON(ctx, studioURL, "/api/v1/models/load", map[string]any{"model": name, "context_length": contextTokens, "echo_load_config": true}, &loaded, 16000)
-	if err != nil {
-		return "", err
+	if err := localJSON(ctx, studioURL, "/api/v1/models/load", map[string]any{"model": name, "context_length": contextTokens, "echo_load_config": true}, &load, 16000); err != nil {
+		return "", false, err
 	}
-	if loaded.Status != "loaded" || loaded.ID == "" || loaded.Config.Context < contextTokens {
-		return "", errors.New("local model has insufficient context")
+	if load.Status != "loaded" || load.ID == "" || load.Config.Context < contextTokens {
+		return "", load.ID != "", errors.New("local model has insufficient context")
 	}
-	return loaded.ID, nil
+	return load.ID, true, nil
 }
 func (a *application) infer(ctx context.Context, t task) (turn, error) {
 	if len(t.Messages) == 0 || len(t.Messages) > 300 || len(t.Tools) > 100 || t.MaxTokens < 1 || t.MaxTokens > 16384 || t.ContextTokens < 2048 || t.ContextTokens > 262144 {
 		return turn{}, errors.New("invalid model request")
 	}
 	a.mu.RLock()
-	found, thinks := false, false
+	found, thinks, contextTokens := false, false, 0
 	for _, m := range a.models {
 		if m.Key == t.Model.Key && m.Engine == t.Model.Engine {
-			found, thinks = true, m.Thinking
+			found, thinks, contextTokens = true, m.Thinking, m.ContextTokens
 			break
 		}
 	}
 	a.mu.RUnlock()
 	if !found {
 		return turn{}, errors.New("model no longer available")
+	}
+	// The server cannot ask for more context than this computer published for the model:
+	// the budget decides how much memory the local engine allocates.
+	if t.ContextTokens > contextTokens {
+		return turn{}, errors.New("context exceeds the local model budget")
 	}
 	name := strings.TrimPrefix(t.Model.Key, t.Model.Engine+":")
 	if name == t.Model.Key || name == "" {
@@ -366,7 +382,18 @@ func (a *application) infer(ctx context.Context, t task) (turn, error) {
 		}
 		a.debugf("LLM ← %s · prompt %d token · generati %d token%s", time.Since(started).Round(time.Millisecond), response.PromptEvalCount, response.EvalCount, speed)
 	} else if t.Model.Engine == "lmstudio" {
-		instance, err := studioInstance(ctx, name, t.ContextTokens)
+		a.mu.RLock()
+		owned := a.studioLoaded[name]
+		a.mu.RUnlock()
+		instance, loaded, err := studioInstance(ctx, name, t.ContextTokens, owned)
+		if loaded {
+			a.mu.Lock()
+			if a.studioLoaded == nil {
+				a.studioLoaded = map[string]string{}
+			}
+			a.studioLoaded[name] = instance
+			a.mu.Unlock()
+		}
 		if err != nil {
 			return turn{}, err
 		}

@@ -130,6 +130,6 @@ func TestIndependentSDKDesktopRoundTrip(t *testing.T) {
 	if !bytes.Contains(raw, []byte(`"executions":1`)) {
 		t.Fatal("tool did not execute exactly once", string(raw))
 	}
-	a.revokeWebLinks()
+	a.revokeLinks()
 	stopTestApp(t, a)
 }

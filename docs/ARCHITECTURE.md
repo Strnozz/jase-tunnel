@@ -39,7 +39,7 @@ Il server del sito deve fornire il broker sotto `/api/companion/`, con associazi
 ## Motori locali e dati
 
 - Ollama: `127.0.0.1:11434`.
-- LM Studio: `127.0.0.1:1234`, con API locale abilitata; l’eventuale `JASE_LMSTUDIO_TOKEN` rimane sul computer.
+- LM Studio: `127.0.0.1:1234`, con API locale abilitata; l’eventuale `JASE_LMSTUDIO_TOKEN` rimane sul computer. Il tunnel tiene al massimo un’istanza propria per modello: se serve più contesto sostituisce quella caricata in precedenza, senza scaricare le istanze aperte dall’utente. Il contesto richiesto non può superare quello pubblicato per il modello.
 - I modelli cloud di Ollama sono esclusi. Non viene scelto un provider remoto se il modello locale non risponde.
 - La scansione è limitata ai percorsi predefiniti dei modelli e all’eventuale `OLLAMA_MODELS`, senza leggere le schede del browser o percorrere interi dischi.
 - Lo stato privato è nella sottocartella `Jase` della cartella di configurazione dell’utente. `--state-dir` permette una posizione separata per le prove.
