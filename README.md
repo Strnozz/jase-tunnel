@@ -96,8 +96,8 @@ Questa versione scrive in `dist/`. `--out <cartella>` permette un percorso diffe
 
 Gli eseguibili sono pubblicati in [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases); il pannello web dei siti propone il download da qui. Il workflow `release.yml` si attiva sulla pubblicazione di un tag che corrisponde a `VERSION`:
 
-- `v0.3.1`: release stabile per i siti HTTPS pubblici.
-- `dev-v0.3.1-preview1`: prerelease di sviluppo, che accetta anche siti in `localhost`.
+- `v0.3.2`: release stabile per i siti HTTPS pubblici.
+- `dev-v0.3.2-preview1`: prerelease di sviluppo, che accetta anche siti in `localhost`.
 
 Prima verifica il codice sui tre sistemi, poi compila i cinque pacchetti sul runner Mac. Controlla commit, run, canale, inventario e SHA-256 e carica i file in una bozza; solo dopo il caricamento completo rende pubblica la release. Una release già pubblica non viene sovrascritta.
 
@@ -119,3 +119,13 @@ Per riprendere una pubblicazione dopo la creazione della release GitHub, avvia m
 | `.github/workflows/` | Verifiche su Windows, macOS e Linux e pubblicazione |
 | `docs/` | Architettura e protocollo `jase-tunnel-v1` |
 | `VERSION` | Versione dell’app |
+| `LICENSE`, `NOTICE` | Licenza Apache 2.0 e avvisi di attribuzione |
+| `TRADEMARK_POLICY.md` | Uso del nome e del logo Jase Tunnel |
+
+## Licenza e marchio
+
+Jase Tunnel è open source con la [Apache License 2.0](LICENSE): app desktop, modulo per i siti e specifica del protocollo si possono usare, modificare e ridistribuire, anche in prodotti commerciali, conservando gli avvisi di [`LICENSE`](LICENSE) e [`NOTICE`](NOTICE) e indicando i file modificati. La licenza include una concessione esplicita dei brevetti dei contributori.
+
+Il nome «Jase Tunnel» e il logo non fanno parte della licenza del codice. Il loro uso è regolato dalla [politica del marchio](TRADEMARK_POLICY.md): le versioni modificate possono chiamarsi `Jase Tunnel - Exp<NomeDistribuzione>` dichiarando le modifiche, oppure usare un nome del tutto diverso; le implementazioni indipendenti possono dichiararsi compatibili con il protocollo `jase-tunnel-v1`.
+
+I componenti di terze parti incorporati nelle build sono elencati in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

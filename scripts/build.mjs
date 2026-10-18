@@ -31,7 +31,7 @@ const revision = head?.status === 0 ? head.stdout.trim() : "local";
 await desktopIcon(join(root,"assets/icon.svg"),join(root,"assets/desktop-icon.png"));
 const status = ownRepository ? git(["status", "--porcelain"]) : undefined;
 const dirty = revision === "local" || status?.status !== 0 || !!status?.stdout.trim();
-const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/icon.svg", "assets/desktop-icon.png", "scripts/companion-icons.mjs", "scripts/build.mjs", "package.json", "package-lock.json"].map(name => join(root, name))];
+const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/icon.svg", "assets/desktop-icon.png", "scripts/companion-icons.mjs", "scripts/build.mjs", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json"].map(name => join(root, name))];
 const sourceHash = createHash("sha256");
 for (const path of sources.sort()) sourceHash.update(readFileSync(path));
 const source = sourceHash.digest("hex").slice(0, 12);
@@ -67,14 +67,17 @@ try {
     const dir = join(temporary, `linux-${name}`, "Jase-Tunnel"); mkdirSync(dir, { recursive: true }); compile("linux", arch, join(dir, "jase-tunnel")); chmodSync(join(dir, "jase-tunnel"), 0o755);
     writeFileSync(join(dir, "LEGGIMI.txt"), "Jase Tunnel\n\nEstrai questa cartella e avvia jase-tunnel: si apre il pannello nativo con modelli, collegamenti e registro attività. Serve GTK 3 (libgtk-3-0 oppure libgtk-3-0t64 su Ubuntu/Debian).\n\nMentre navighi, le pagine che accettano Jase Tunnel si annunciano e ricevi una notifica (serve notify-send, pacchetto libnotify-bin). Il collegamento parte solo dopo che hai scelto il modello nel pannello e dura al massimo 30 minuti.\n\nIl menu dell’icona offre Apri Jase Tunnel, Aggiungi pesi e Chiudi Jase Tunnel. Per l’area di notifica è consigliato Ayatana AppIndicator; sui desktop senza supporto alle icone, chiudere la finestra la riduce a icona nella barra applicazioni. Per terminare il processo scegli Chiudi Jase Tunnel nel pannello o nel menu.\n\nPer la diagnostica da terminale: ./jase-tunnel --headless --foreground\nI modelli sono eseguiti da Ollama o LM Studio sul computer. Nessun account o servizio cloud è richiesto.\n");
     mkdirSync(join(dir,"LICENSES"),{recursive:true});
+    writeFileSync(join(dir,"LICENSES","LICENSE.txt"),readFileSync(join(root,"LICENSE")));
+    writeFileSync(join(dir,"LICENSES","NOTICE.txt"),readFileSync(join(root,"NOTICE")));
     writeFileSync(join(dir,"LICENSES","purego.txt"),readFileSync(join(root,"third_party/purego-LICENSE")));
-    writeFileSync(join(dir,"LICENSES","NOTICE.txt"),readFileSync(join(root,"THIRD_PARTY_NOTICES.md")));
+    writeFileSync(join(dir,"LICENSES","THIRD_PARTY_NOTICES.txt"),readFileSync(join(root,"THIRD_PARTY_NOTICES.md")));
     const linux = `Jase-Tunnel-Linux-${name}.tar.gz`; run("tar", ["-czf", join(output, linux), "-C", join(temporary, `linux-${name}`), "Jase-Tunnel"]); record(`linux-${name}`, linux);
   }
   const app = join(temporary, "Jase Tunnel.app"), contents = join(app, "Contents"), binary = join(contents, "MacOS", "Jase Tunnel"); mkdirSync(join(contents, "MacOS"), { recursive: true });
   const intel = join(temporary, "mac-intel"), arm = join(temporary, "mac-arm"); compile("darwin", "amd64", intel); compile("darwin", "arm64", arm); universal(intel, arm, binary);
   const resources = join(contents,"Resources"), iconSet = join(temporary,"Jase.iconset"); mkdirSync(resources,{recursive:true});
   await companionIcons(join(root,"assets/icon.svg"),resources,iconSet);
+  for (const name of ["LICENSE", "NOTICE"]) writeFileSync(join(resources, `${name}.txt`), readFileSync(join(root, name)));
   run("/usr/bin/iconutil",["-c","icns",iconSet,"-o",join(resources,"Jase.icns")]);
   writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>io.github.strnozz.jase-tunnel</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Collega i modelli locali ai siti che autorizzi.</string></dict></plist>`);
   const signed = process.platform === "darwin";

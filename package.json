@@ -1,7 +1,8 @@
 {
   "name": "jase-tunnel",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
+  "license": "Apache-2.0",
   "description": "Jase Tunnel: collega i modelli locali agli strumenti IA del sito.",
   "type": "module",
   "engines": {
