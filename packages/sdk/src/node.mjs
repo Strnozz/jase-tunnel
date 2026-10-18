@@ -38,7 +38,8 @@ export function nodeMiddleware(site) {
     // A long poll ends when the browser or the desktop app goes away.
     const controller = new AbortController();
     res.on('close', () => { if (!res.writableEnded) controller.abort(); });
-    site.handle(toRequest(req, controller.signal)).then(response => send(response, res)).catch(error => {
+    // The socket's address lets the module limit anonymous requests per client.
+    site.handle(toRequest(req, controller.signal), { clientAddress: req.socket?.remoteAddress }).then(response => send(response, res)).catch(error => {
       if (next) return next(error);
       if (!res.headersSent) { res.statusCode = 500; res.end(); }
     });

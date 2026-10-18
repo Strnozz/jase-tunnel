@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -36,6 +37,25 @@ type webDiscovery struct {
 	Announced    bool        `json:"-"`
 	ConnectionID string      `json:"connectionId,omitempty"`
 }
+
+// Limits on what pages can ask of the app. A page cannot choose the Origin its browser
+// sends, so per-origin limits keep one site (open in many tabs, or hostile) from using
+// up the budget of every other site.
+const (
+	discoverPerOrigin = 20  // discoveries per site per minute
+	discoverGlobal    = 120 // discoveries per minute, all sites together
+	pendingPerOrigin  = 30  // unexpired receipts per site
+	pendingGlobal     = 300 // unexpired receipts, all sites together
+	// After «Rifiuta» the same site cannot reopen the consent dialog for a while.
+	consentCooldown = 2 * time.Minute
+	// A site brings the window to the front at most this often.
+	focusEvery = 30 * time.Second
+)
+
+type rateWindow struct {
+	start time.Time
+	count int
+}
 type webManager struct {
 	mu       sync.Mutex
 	requests map[string]*webDiscovery
@@ -43,6 +63,11 @@ type webManager struct {
 	minute   time.Time
 	count    int
 	checking int
+	// Discoveries per site in the current minute.
+	perOrigin map[string]*rateWindow
+	// Last «Rifiuta» and last window focus, per site.
+	rejected map[string]time.Time
+	focused  map[string]time.Time
 	// Manifests verified in the last five minutes: another page of the same site is
 	// recognised without fetching the manifest again.
 	verified map[string]verifiedSite
@@ -81,7 +106,7 @@ func (a *application) webManager() *webManager {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.web == nil {
-		a.web = &webManager{requests: map[string]*webDiscovery{}, checked: map[string]time.Time{}}
+		a.web = &webManager{requests: map[string]*webDiscovery{}, checked: map[string]time.Time{}, perOrigin: map[string]*rateWindow{}, rejected: map[string]time.Time{}, focused: map[string]time.Time{}}
 	}
 	return a.web
 }
@@ -116,7 +141,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 			Protocol string `json:"protocol"`
 			Announce bool   `json:"announce,omitempty"`
 		}
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decode(w, r, &input, 4096) != nil || input.Protocol != webProtocol {
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decodeWeb(w, r, &input, 4096) != nil || input.Protocol != webProtocol {
 			webFail(w, 400, "invalid_request", "Richiesta non valida.")
 			return
 		}
@@ -142,10 +167,26 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 				delete(m.verified, key)
 			}
 		}
-		// Only fetching a manifest is limited per site: a reload or another page of a
-		// site verified moments ago is answered from the verification just made.
+		for key, value := range m.perOrigin {
+			if now.Sub(value.start) >= time.Minute {
+				delete(m.perOrigin, key)
+			}
+		}
+		window := m.perOrigin[origin]
+		if window == nil {
+			window = &rateWindow{start: now}
+			m.perOrigin[origin] = window
+		}
+		outstanding := 0
+		for _, value := range m.requests {
+			if value.Origin == origin {
+				outstanding++
+			}
+		}
+		// Fetching a manifest is limited per site: a reload or another page of a site
+		// verified moments ago is answered from the verification just made.
 		cached, recent := m.verified[origin]
-		if m.count >= 20 || len(m.requests) >= 100 || !recent && (m.checking >= 4 || !m.checked[origin].IsZero()) {
+		if m.count >= discoverGlobal || len(m.requests) >= pendingGlobal || window.count >= discoverPerOrigin || outstanding >= pendingPerOrigin || !recent && (m.checking >= 4 || !m.checked[origin].IsZero()) {
 			m.mu.Unlock()
 			w.Header().Set("Retry-After", "60")
 			webFail(w, 429, "rate_limited", "Attendi un minuto prima di rilevare di nuovo questo sito.")
@@ -159,6 +200,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		m.requests[webHash(receipt)] = d
 		state := d.State
 		m.count++
+		window.count++
 		if !recent {
 			m.checked[origin] = now
 			m.checking++
@@ -203,11 +245,27 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 			webFail(w, 409, "pairing_in_progress", "Associazione non disponibile. Riprova il rilevamento.")
 			return
 		}
+		now := time.Now()
+		// One consent dialog per site at a time, and none for a while after «Rifiuta»:
+		// a page cannot keep reopening the dialog.
+		if at := m.rejected[origin]; !at.IsZero() && now.Sub(at) < consentCooldown {
+			m.mu.Unlock()
+			w.Header().Set("Retry-After", fmt.Sprint(int((consentCooldown-now.Sub(at)).Seconds())+1))
+			webFail(w, 429, "consent_cooldown", "Hai appena rifiutato questo sito. Riprova tra qualche minuto.")
+			return
+		}
+		for _, other := range m.requests {
+			if other != d && other.Origin == origin && (other.State == "awaiting_approval" || other.State == "connecting") && other.ExpiresAt > now.UnixMilli() {
+				m.mu.Unlock()
+				webFail(w, 409, "pairing_in_progress", "Una richiesta di consenso per questo sito è già aperta.")
+				return
+			}
+		}
 		var input struct {
 			Protocol string `json:"protocol"`
 			Ticket   string `json:"ticket"`
 		}
-		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decode(w, r, &input, 4096) != nil || input.Protocol != webProtocol || len(input.Ticket) != 64 {
+		if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") || decodeWeb(w, r, &input, 4096) != nil || input.Protocol != webProtocol || len(input.Ticket) != 64 {
 			m.mu.Unlock()
 			webFail(w, 400, "invalid_request", "Associazione non valida.")
 			return
@@ -219,11 +277,20 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		}
 		d.State = "awaiting_approval"
 		d.Ticket = input.Ticket
-		d.ExpiresAt = time.Now().Add(120 * time.Second).UnixMilli()
+		d.ExpiresAt = now.Add(120 * time.Second).UnixMilli()
 		id := d.ID
+		focus := now.Sub(m.focused[origin]) >= focusEvery
+		if focus {
+			m.focused[origin] = now
+		}
+		for key, value := range m.focused {
+			if now.Sub(value) >= focusEvery {
+				delete(m.focused, key)
+			}
+		}
 		m.mu.Unlock()
 		a.recordFor(origin, "app", "info", "Consenso richiesto", "Il sito chiede il tunnel: scegli il modello nel pannello Jase Tunnel.")
-		if a.nativeUI {
+		if a.nativeUI && focus {
 			showDesktopUI()
 		}
 		respond(w, 202, map[string]any{"protocol": webProtocol, "discoveryId": id, "state": "awaiting_approval"})
@@ -449,6 +516,13 @@ func (a *application) answerWebConsent(id, key string) {
 	if key == "" {
 		current.State = "rejected"
 		current.Ticket = ""
+		now := time.Now()
+		for site, at := range m.rejected {
+			if now.Sub(at) >= consentCooldown {
+				delete(m.rejected, site)
+			}
+		}
+		m.rejected[current.Origin] = now
 		m.mu.Unlock()
 		a.recordFor(current.Origin, "app", "info", "Collegamento rifiutato", "Hai rifiutato il tunnel nel pannello.")
 		return

@@ -30,10 +30,12 @@ type tool struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 type task struct {
-	ID            string         `json:"id"`
-	Model         model          `json:"model"`
-	Messages      []message      `json:"messages"`
-	Tools         []tool         `json:"tools"`
+	ID       string    `json:"id"`
+	Model    model     `json:"model"`
+	Messages []message `json:"messages"`
+	Tools    []tool    `json:"tools"`
+	// Structured output is not part of jase-tunnel-v1: a task that asks for it is
+	// refused by validWebTask instead of being run without the schema.
 	Schema        map[string]any `json:"schema,omitempty"`
 	Temperature   float64        `json:"temperature"`
 	MaxTokens     int            `json:"maxTokens"`

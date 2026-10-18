@@ -72,6 +72,8 @@ type application struct {
 	notify func(id, title, body string)
 	// LM Studio instance loaded by Jase Tunnel for each model name (see studioInstance).
 	studioLoaded map[string]string
+	// Last successful answer of each local engine (see refreshModels).
+	engineSeen map[string]time.Time
 }
 
 func main() {
@@ -257,9 +259,22 @@ func respond(w http.ResponseWriter, status int, value any) {
 func fail(w http.ResponseWriter, status int, message string) {
 	respond(w, status, map[string]any{"error": map[string]string{"message": message}})
 }
+
+// decode reads one JSON value and refuses unknown fields: for the app's own local API.
 func decode(w http.ResponseWriter, r *http.Request, value any, limit int64) error {
+	return decodeJSON(w, r, value, limit, true)
+}
+
+// decodeWeb reads what websites send. The site module and the app are updated
+// independently, so a field added by a newer module is ignored rather than refused.
+func decodeWeb(w http.ResponseWriter, r *http.Request, value any, limit int64) error {
+	return decodeJSON(w, r, value, limit, false)
+}
+func decodeJSON(w http.ResponseWriter, r *http.Request, value any, limit int64, strict bool) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
-	decoder.DisallowUnknownFields()
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(value); err != nil {
 		return err
 	}

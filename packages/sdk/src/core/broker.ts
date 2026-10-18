@@ -111,11 +111,22 @@ export class TunnelBroker {
     if (signal?.aborted) throw signal.reason;
     if (JSON.stringify(input).length > 1_000_000) throw new TunnelError(413, "context_too_large", "Il contesto è troppo grande per il modello personale.");
     // Queued, not refused: the computer answers in order. Refused only beyond the queue.
-    if (this.pending.size >= 500 || [...this.pending.values()].filter(p => p.connection === c.id).length >= QUEUE_PER_DEVICE()) throw new TunnelError(429, "model_busy", "Il tuo modello ha già troppe richieste in coda. Attendi e riprova.");
+    const queued = [...this.pending.values()].filter(p => p.connection === c.id).length;
+    if (this.pending.size >= 500 || queued >= QUEUE_PER_DEVICE()) {
+      throw new TunnelError(429, "model_busy", "Il tuo modello ha già troppe richieste in coda. Attendi e riprova.");
+    }
     const used = this.usage.get(c.browserHash), now = this.now();
-    if (used && now - used.start < HOUR && used.count >= TURNS_PER_HOUR()) throw new TunnelError(429, "hourly_limit", "Hai raggiunto il limite orario di richieste con il tuo modello. Riprova più tardi.");
-    if (!used || now - used.start >= HOUR) { if (this.usage.size > 20_000) this.usage.clear(); this.usage.set(c.browserHash, { start: now, count: 1 }); } else used.count++;
-    const id = secret(), task = { ...input, id, model, contextTokens: Math.min(input.contextTokens, model.contextTokens ?? input.contextTokens), expiresAt: this.now() + timeoutMs };
+    if (used && now - used.start < HOUR && used.count >= TURNS_PER_HOUR()) {
+      throw new TunnelError(429, "hourly_limit", "Hai raggiunto il limite orario di richieste con il tuo modello. Riprova più tardi.");
+    }
+    if (!used || now - used.start >= HOUR) {
+      if (this.usage.size > 20_000) this.usage.clear();
+      this.usage.set(c.browserHash, { start: now, count: 1 });
+    } else {
+      used.count++;
+    }
+    const contextTokens = Math.min(input.contextTokens, model.contextTokens ?? input.contextTokens);
+    const id = secret(), task = { ...input, id, model, contextTokens, expiresAt: this.now() + timeoutMs };
     return new Promise<ModelTurn>((resolve, reject) => {
       const abort = () => finish(undefined, signal?.reason ?? new Error("Model request cancelled"));
       const late = () => finish(undefined, new TunnelError(504, "model_timeout", "Il modello personale non ha risposto in tempo."));
@@ -124,10 +135,13 @@ export class TunnelBroker {
         clearTimeout(timer); timer = setTimeout(late, timeoutMs); timer.unref();
         return { ...task, expiresAt: this.now() + timeoutMs };
       };
+      // The computer stopped polling, or stopped confirming a turn it is answering.
       const watch = setInterval(() => {
         const p = this.pending.get(id);
-        if (p && (c.lastSeen <= this.now() - ONLINE || p.delivered && p.heartbeat <= this.now() - 30_000)) p.finish(undefined, new TunnelError(503, "device_offline", "Il collegamento al tuo computer si è interrotto. Apri Jase Tunnel e riprova."));
-      }, 10_000); watch.unref();
+        const silent = c.lastSeen <= this.now() - ONLINE || p?.delivered && p.heartbeat <= this.now() - 30_000;
+        if (p && silent) p.finish(undefined, new TunnelError(503, "device_offline", "Il collegamento al tuo computer si è interrotto. Apri Jase Tunnel e riprova."));
+      }, 10_000);
+      watch.unref();
       const finish = (turn?: ModelTurn, error?: Error) => {
         if (!this.pending.delete(id)) return;
         clearTimeout(timer); clearInterval(watch); signal?.removeEventListener("abort", abort);
@@ -148,8 +162,12 @@ export class TunnelBroker {
       const timer = setTimeout(done, waitMs); timer.unref();
       this.wake.set(c.id, done); signal?.addEventListener("abort", done, { once: true });
     });
-    const pending = next(); this.debug(signal?.aborted ? "poll-aborted" : pending ? "delivered" : "poll-empty"); if (!pending || signal?.aborted) return null;
-    pending.delivered = true; pending.heartbeat = this.now(); return pending.deliver();
+    const pending = next();
+    this.debug(signal?.aborted ? "poll-aborted" : pending ? "delivered" : "poll-empty");
+    if (!pending || signal?.aborted) return null;
+    pending.delivered = true;
+    pending.heartbeat = this.now();
+    return pending.deliver();
   }
   active(token: string, id: string) {
     const c = this.authenticate(token), pending = this.pending.get(id);
@@ -179,7 +197,13 @@ export class TunnelBroker {
     this.save();
   }
   disconnect(browser: string | undefined) { if (!browser) return; for (const c of [...this.connections.values()]) if (c.browserHash === hash(browser)) this.remove(c.id); this.save(); }
-  private remove(id: string) { this.connections.delete(id); this.wake.get(id)?.(); for (const p of [...this.pending.values()]) if (p.connection === id) p.finish(undefined, new TunnelError(503, "device_disconnected", "Computer scollegato.")); }
+  private remove(id: string) {
+    this.connections.delete(id);
+    this.wake.get(id)?.();
+    for (const p of [...this.pending.values()]) {
+      if (p.connection === id) p.finish(undefined, new TunnelError(503, "device_disconnected", "Computer scollegato."));
+    }
+  }
 }
 
 export function validateModels(input: unknown): TunnelModel[] {

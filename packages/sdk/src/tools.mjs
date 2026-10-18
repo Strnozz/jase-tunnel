@@ -23,8 +23,15 @@ export function adaptTool(value, options = {}) {
   const execute = typeof value === 'function' ? value : value.execute ?? value.invoke;
   if (typeof execute !== 'function') throw new Error(`${name}: esecutore mancante.`);
   const readOnly = options.readOnly === true || value.readOnly === true || value.riskLevel === 'read' || value.annotations?.readOnlyHint === true;
+  // The model runs on the visitor's computer, so the visitor decides every tool call and
+  // its arguments. A tool is reachable only when it checks the session itself
+  // (authorize) or its owner declared it safe for any visitor (public).
+  const isPublic = options.public === true || value.public === true;
+  if (typeof value.authorize !== 'function' && !isPublic) {
+    throw new Error(`${name}: ogni visitatore può chiamare questo strumento con argomenti a sua scelta. Aggiungi authorize(context, args) oppure dichiara public: true se è sicuro per chiunque.`);
+  }
   return {
-    name, description, parameters, readOnly,
+    name, description, parameters, readOnly, public: isPublic,
     async execute(args, context) {
       if (!validate(args)) throw new Error('Argomenti dello strumento non validi.');
       context.signal.throwIfAborted();
