@@ -116,7 +116,11 @@ test('CLI init wraps a node:http handler: manifest and panel are served, other r
  assert.match(result.stdout,/Aggiungi il pannello alle tue pagine/);
  assert.match(readFileSync(join(root,'server.mjs'),'utf8'),/http\.createServer\(withJaseTunnel\(\(req, res\) => \{ res\.end/);
  mkdirSync(join(root,'node_modules'));symlinkSync(resolve('.'),join(root,'node_modules','jase-tunnel'),'dir');
- const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root});t.after(()=>child.kill());
+ const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root});
+ const closed=new Promise(done=>child.once('close',done));
+ // Windows cannot remove a running process's working directory. Stop the server
+ // before fixture(t)'s cleanup runs, including when startup or an assertion fails.
+ try {
  const port=await new Promise((done,fail)=>{child.stdout.once('data',d=>done(String(d).trim()));child.once('exit',code=>fail(new Error('server exited '+code)));});
  const base=`http://127.0.0.1:${port}`;
  const manifest=await (await fetch(base+'/.well-known/jase-tunnel.json')).json();
@@ -124,6 +128,10 @@ test('CLI init wraps a node:http handler: manifest and panel are served, other r
  const widget=await fetch(base+'/api/jase-tunnel/v1/client/widget.mjs');
  assert.equal(widget.status,200);assert.match(widget.headers.get('content-type'),/javascript/);assert.match(await widget.text(),/mountJaseTunnel/);
  assert.equal(await (await fetch(base+'/shop?x=1')).text(),'app /shop?x=1');
+ } finally {
+  child.kill();
+  await closed;
+ }
 });
 
 test('a grant revoked in the desktop app disappears from the browser session at once',async()=>{
