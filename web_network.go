@@ -90,27 +90,46 @@ func publicWebIP(value net.IP) bool {
 // original hostname/SNI. No environment proxy or redirect can change the destination.
 var webTransport = &http.Transport{Proxy: nil, MaxResponseHeaderBytes: 8192, TLSHandshakeTimeout: 5 * time.Second, ResponseHeaderTimeout: 25 * time.Second,
 	DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		loopback := devBuild == "true" && (host == "localhost" || host == "127.0.0.1" || host == "::1")
-		if !loopback && port != "443" {
-			return nil, errors.New("web destination rejected")
-		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-		if err != nil || len(ips) == 0 {
-			return nil, errors.New("web destination unavailable")
-		}
-		for _, ip := range ips {
-			if !loopback && !publicWebIP(ip.IP) || loopback && !ip.IP.IsLoopback() {
-				return nil, errors.New("web destination rejected")
-			}
-		}
-		dialer := net.Dialer{Timeout: 5 * time.Second}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		host, _, _ := net.SplitHostPort(address)
+		return dialVerified(ctx, network, address, devBuild == "true" && (host == "localhost" || host == "127.0.0.1" || host == "::1"))
 	},
 }
+
+// Validate every DNS answer, then dial the verified addresses in order, so a site whose
+// first address is unreachable (IPv6 without connectivity, ::1 for an IPv4-only local
+// server) still connects. loopback: a development build reaching a local site.
+func dialVerified(ctx context.Context, network, address string, loopback bool) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
+	if !loopback && port != "443" {
+		return nil, errors.New("web destination rejected")
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return nil, errors.New("web destination unavailable")
+	}
+	for _, ip := range ips {
+		if !loopback && !publicWebIP(ip.IP) || loopback && !ip.IP.IsLoopback() {
+			return nil, errors.New("web destination rejected")
+		}
+	}
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	var failure error
+	for _, ip := range ips {
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		failure = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, failure
+}
+
 var webClient = &http.Client{Transport: webTransport, Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
 func validWebLink(c link) bool {

@@ -1,4 +1,4 @@
-import { COMPANION_DOWNLOADS, COMPANION_RELEASES, COMPANION_REPOSITORY } from "./platforms";
+import { TUNNEL_DOWNLOADS, TUNNEL_RELEASES, TUNNEL_REPOSITORY } from "./platforms";
 
 export type TunnelReleaseChannel = "stable" | "development";
 export type TunnelRelease = Readonly<{
@@ -8,12 +8,12 @@ export type TunnelRelease = Readonly<{
   repository: string;
   releases: string;
   message?: string;
-  downloads: readonly (typeof COMPANION_DOWNLOADS[number] & { available: boolean; url?: string })[];
+  downloads: readonly (typeof TUNNEL_DOWNLOADS[number] & { available: boolean; url?: string })[];
 }>;
 type GitHubFetch = (url: string, init?: RequestInit) => Promise<Response>;
 type ReleaseAsset = { name?: unknown; state?: unknown; size?: unknown; browser_download_url?: unknown };
 type Release = { tag_name?: unknown; draft?: unknown; prerelease?: unknown; published_at?: unknown; assets?: unknown };
-const API = `https://api.github.com/repos/${COMPANION_REPOSITORY}/releases`;
+const API = `https://api.github.com/repos/${TUNNEL_REPOSITORY}/releases`;
 
 export function tunnelReleaseChannel(): TunnelReleaseChannel {
   const configured = process.env.JASE_TUNNEL_RELEASE_CHANNEL;
@@ -46,7 +46,7 @@ function releaseMatches(value: unknown, channel: TunnelReleaseChannel): value is
     && Number.isFinite(Date.parse(r.published_at)) && Array.isArray(r.assets);
 }
 
-// Only metadata passes through Jase. Executables travel from GitHub to the
+// Only metadata passes through the service. Executables travel from GitHub to the
 // browser; coalescing and caching bound the unauthenticated API requests.
 export class TunnelReleaseCatalog {
   private cache = new Map<TunnelReleaseChannel, { expires: number; value: TunnelRelease }>();
@@ -67,11 +67,11 @@ export class TunnelReleaseCatalog {
   }
 
   private empty(channel: TunnelReleaseChannel, unavailable = false): TunnelRelease {
-    return { status: unavailable ? "unavailable" : "not-published", channel, repository: COMPANION_REPOSITORY, releases: COMPANION_RELEASES,
+    return { status: unavailable ? "unavailable" : "not-published", channel, repository: TUNNEL_REPOSITORY, releases: TUNNEL_RELEASES,
       message: unavailable ? "Non riesco a verificare i download di Jase Tunnel su GitHub. Riprova tra poco."
         : channel === "development" ? "La versione di Jase Tunnel per localhost deve ancora essere pubblicata su GitHub."
         : "Gli eseguibili di Jase Tunnel devono ancora essere pubblicati su GitHub.",
-      downloads: COMPANION_DOWNLOADS.map(d => ({ ...d, available: false })) };
+      downloads: TUNNEL_DOWNLOADS.map(d => ({ ...d, available: false })) };
   }
 
   private async lookup(channel: TunnelReleaseChannel): Promise<TunnelRelease> {
@@ -87,8 +87,8 @@ export class TunnelReleaseCatalog {
       const release = candidates.filter(r => releaseMatches(r, channel))
         .sort((a, b) => Date.parse(b.published_at as string) - Date.parse(a.published_at as string))[0];
       if (!release) return this.empty(channel);
-      const base = `https://github.com/${COMPANION_REPOSITORY}/releases/download/${release.tag_name}/`;
-      const downloads = COMPANION_DOWNLOADS.map(d => {
+      const base = `https://github.com/${TUNNEL_REPOSITORY}/releases/download/${release.tag_name}/`;
+      const downloads = TUNNEL_DOWNLOADS.map(d => {
         const url = base + d.filename;
         const available = release.assets.some(a => a && typeof a === "object" && a.name === d.filename && a.state === "uploaded"
           && typeof a.size === "number" && Number.isSafeInteger(a.size) && a.size > 0 && a.size <= 150 * 1024 ** 2
@@ -96,7 +96,7 @@ export class TunnelReleaseCatalog {
         return { ...d, available, ...(available ? { url } : {}) };
       });
       if (!downloads.some(d => d.available)) return this.empty(channel);
-      return { status: "available", channel, version: release.tag_name, repository: COMPANION_REPOSITORY, releases: COMPANION_RELEASES, downloads };
+      return { status: "available", channel, version: release.tag_name, repository: TUNNEL_REPOSITORY, releases: TUNNEL_RELEASES, downloads };
     } catch { return this.empty(channel, true); }
   }
 }

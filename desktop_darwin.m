@@ -1,6 +1,7 @@
 //go:build darwin && cgo
 
 #import <AppKit/AppKit.h>
+#import <UserNotifications/UserNotifications.h>
 
 extern void jaseDesktopQuit(void);
 extern char *jaseDesktopState(unsigned long long);
@@ -9,9 +10,11 @@ extern void jaseDesktopImport(char *, int);
 extern void jaseDesktopImportFound(char *);
 extern char *jaseDesktopApproval(void);
 extern void jaseDesktopConsent(char *,char *);
+extern void jaseDesktopNotificationClicked(char *);
+extern void jaseDesktopRevokeSite(char *);
 
-// Artwork comes from the website favicon, rasterized by the package builder.
-// The app keeps its colors; the menu bar uses the favicon's white silhouette.
+// Artwork comes from assets/icon.svg, rasterized by the package builder.
+// The app keeps its colors; the menu bar uses the icon's white silhouette.
 static NSImage *JaseIcon(CGFloat size, BOOL menu) {
     NSString *name=menu?@"JaseMenu":@"Jase";
     NSImage *source=[NSImage imageNamed:name];
@@ -45,7 +48,7 @@ static NSView *JaseSpacer(void) {
     [view setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];return view;
 }
 
-@interface JaseDesktopDelegate : NSObject <NSApplicationDelegate,NSWindowDelegate,NSTableViewDataSource,NSTableViewDelegate>
+@interface JaseDesktopDelegate : NSObject <NSApplicationDelegate,NSWindowDelegate,NSTableViewDataSource,NSTableViewDelegate,UNUserNotificationCenterDelegate>
 @property(retain) NSStatusItem *statusItem;
 @property(retain) NSMenuItem *addMenuItem;
 @property(retain) NSWindow *window;
@@ -65,6 +68,10 @@ static NSView *JaseSpacer(void) {
 @property(retain) NSPopUpButton *filter;
 @property(retain) NSTableView *modelTable;
 @property(retain) NSTableView *logTable;
+@property(retain) NSTableView *siteTable;
+@property(retain) NSArray *sites;
+@property(retain) NSString *selectedSite;
+@property(retain) NSButton *revokeSiteButton;
 @property(retain) NSTextView *detail;
 @property(retain) NSArray *models;
 @property(retain) NSMutableArray *events;
@@ -114,16 +121,22 @@ static NSView *JaseSpacer(void) {
     for(NSView *child in @[scroll,buttons,self.notice]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
     return pane;
 }
+// Left: every site with its tunnel state. Right: the console of the selected site.
 - (NSView *)activityPane {
+    NSTableView *sites=nil;
+    NSScrollView *siteScroll=[self table:&sites columns:@[@[@"site",@"Siti",@200]]];
+    self.siteTable=sites;sites.rowHeight=40;sites.usesAlternatingRowBackgroundColors=NO;[sites setAccessibilityLabel:@"Siti"];
+    [siteScroll.widthAnchor constraintEqualToConstant:220].active=YES;
+    self.revokeSiteButton=[self button:@"Scollega sito" action:@selector(revokeSite:)];self.revokeSiteButton.enabled=NO;
     self.statistics=JaseLabel(@"Nessuna attività",12,NSFontWeightRegular);self.statistics.textColor=NSColor.secondaryLabelColor;
     self.filter=[[[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO] autorelease];
     for(NSArray *option in @[@[@"Tutte le attività",@"all"],@[@"Chiamate al server",@"server"],@[@"Ricezioni dal server",@"receive"],@[@"Modello e interprete",@"model"],@[@"Errori",@"error"]]) {
         [self.filter addItemWithTitle:option[0]];self.filter.lastItem.representedObject=option[1];
     }
     [self.filter setAccessibilityLabel:@"Filtra registro"];self.filter.target=self;self.filter.action=@selector(filterChanged:);
-    NSStackView *toolbar=JaseStack(@[self.filter,JaseSpacer(),[self button:@"Svuota registro" action:@selector(clearLog:)]],NSUserInterfaceLayoutOrientationHorizontal);
+    NSStackView *toolbar=JaseStack(@[self.filter,JaseSpacer(),self.revokeSiteButton,[self button:@"Svuota registro" action:@selector(clearLog:)]],NSUserInterfaceLayoutOrientationHorizontal);
     NSTableView *table=nil;
-    NSScrollView *scroll=[self table:&table columns:@[@[@"time",@"Ora",@85],@[@"event",@"Attività",@535]]];self.logTable=table;
+    NSScrollView *scroll=[self table:&table columns:@[@[@"time",@"Ora",@70],@[@"event",@"Attività",@330]]];self.logTable=table;
     [table setAccessibilityLabel:@"Registro del tunnel"];
     NSScrollView *inspector=[[[NSScrollView alloc] init] autorelease];inspector.hasVerticalScroller=YES;inspector.autohidesScrollers=YES;inspector.borderType=NSBezelBorder;
     self.detail=[[[NSTextView alloc] initWithFrame:NSMakeRect(0,0,600,76)] autorelease];
@@ -132,9 +145,11 @@ static NSView *JaseSpacer(void) {
     self.detail.textContainer.widthTracksTextView=YES;self.detail.string=@"Seleziona un evento per leggerne i dettagli.";
     [self.detail setAccessibilityLabel:@"Dettagli dell’evento"];inspector.documentView=self.detail;
     [inspector.heightAnchor constraintEqualToConstant:82].active=YES;
-    NSStackView *content=JaseStack(@[self.statistics,toolbar,scroll,inspector],NSUserInterfaceLayoutOrientationVertical);
+    NSStackView *console=JaseStack(@[self.statistics,toolbar,scroll,inspector],NSUserInterfaceLayoutOrientationVertical);
+    for(NSView *child in @[toolbar,scroll,inspector]) [child.widthAnchor constraintEqualToAnchor:console.widthAnchor].active=YES;
+    NSStackView *content=JaseStack(@[siteScroll,console],NSUserInterfaceLayoutOrientationHorizontal);content.alignment=NSLayoutAttributeTop;
+    [siteScroll.heightAnchor constraintEqualToAnchor:content.heightAnchor].active=YES;[console.heightAnchor constraintEqualToAnchor:content.heightAnchor].active=YES;
     NSView *pane=[[[NSView alloc] init] autorelease];JasePin(content,pane,14);
-    for(NSView *child in @[toolbar,scroll,inspector]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
     return pane;
 }
 - (void)applicationDidFinishLaunching:(NSNotification *)note {
@@ -143,7 +158,7 @@ static NSView *JaseSpacer(void) {
 - (void)setupInterface {
     if(self.window)return;
     NSApp.applicationIconImage=JaseIcon(256,NO);
-    self.events=[NSMutableArray array];self.models=@[];self.filteredEvents=@[];self.firstState=YES;
+    self.events=[NSMutableArray array];self.models=@[];self.filteredEvents=@[];self.firstState=YES;self.sites=@[];self.selectedSite=@"*";
     self.dates=[[[NSISO8601DateFormatter alloc] init] autorelease];self.dates.formatOptions=NSISO8601DateFormatWithInternetDateTime|NSISO8601DateFormatWithFractionalSeconds;
     self.clock=[[[NSDateFormatter alloc] init] autorelease];self.clock.dateFormat=@"HH:mm:ss";
     self.statusItem=[NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
@@ -168,14 +183,14 @@ static NSView *JaseSpacer(void) {
     [windows addItemWithTitle:@"Chiudi finestra" action:@selector(performClose:) keyEquivalent:@"w"];NSApp.mainMenu=main;NSApp.windowsMenu=windows;
 
     self.window=[[[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,760,700) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskResizable backing:NSBackingStoreBuffered defer:NO] autorelease];
-    self.window.title=@"Jase Tunnel";self.window.subtitle=@"Il tuo modello, gli strumenti di Jase";self.window.minSize=NSMakeSize(680,640);
+    self.window.title=@"Jase Tunnel";self.window.subtitle=@"La tua LLM locale, sui siti che la accettano";self.window.minSize=NSMakeSize(680,640);
     self.window.releasedWhenClosed=NO;self.window.delegate=self;[self.window center];
     self.statusIcon=[NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"network" accessibilityDescription:@"Collegamento"]];
     [self.statusIcon.widthAnchor constraintEqualToConstant:28].active=YES;[self.statusIcon.heightAnchor constraintEqualToConstant:28].active=YES;
     self.statusTitle=JaseLabel(@"Jase Tunnel è in esecuzione",15,NSFontWeightSemibold);
-    self.statusDetail=JaseLabel(@"In attesa della scheda Jase IA",11,NSFontWeightRegular);self.statusDetail.textColor=NSColor.secondaryLabelColor;
+    self.statusDetail=JaseLabel(@"Naviga normalmente: ti avviso quando una pagina accetta il tunnel",11,NSFontWeightRegular);self.statusDetail.textColor=NSColor.secondaryLabelColor;
     NSStackView *status=JaseStack(@[self.statusTitle,self.statusDetail],NSUserInterfaceLayoutOrientationVertical);status.spacing=5;
-    NSStackView *header=JaseStack(@[self.statusIcon,status,JaseSpacer(),[self button:@"Apri Jase IA" action:@selector(openJase:)]],NSUserInterfaceLayoutOrientationHorizontal);
+    NSStackView *header=JaseStack(@[self.statusIcon,status,JaseSpacer()],NSUserInterfaceLayoutOrientationHorizontal);
     self.tabs=[[[NSTabView alloc] init] autorelease];self.tabs.tabViewType=NSTopTabsBezelBorder;
     NSTabViewItem *models=[[[NSTabViewItem alloc] initWithIdentifier:@"models"] autorelease];models.label=@"Modelli";models.view=[self modelPane];[self.tabs addTabViewItem:models];
     NSTabViewItem *activity=[[[NSTabViewItem alloc] initWithIdentifier:@"activity"] autorelease];activity.label=@"Attività";activity.view=[self activityPane];[self.tabs addTabViewItem:activity];
@@ -190,12 +205,31 @@ static NSView *JaseSpacer(void) {
     NSStackView *content=JaseStack(@[header,self.tabs,options,self.privacy,footer],NSUserInterfaceLayoutOrientationVertical);content.spacing=14;
     JasePin(content,self.window.contentView,20);
     for(NSView *child in @[header,self.tabs,options,self.privacy,footer]) [child.widthAnchor constraintEqualToAnchor:content.widthAnchor].active=YES;
+    // Clicks on earlier notifications reach the app only once this delegate is set.
+    if(NSBundle.mainBundle.bundleIdentifier)UNUserNotificationCenter.currentNotificationCenter.delegate=self;
     [self refresh:nil];self.timer=[NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
     [self showPanel:nil];
 }
 - (void)showPanel:(id)sender { [self.window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES]; }
-- (void)openJase:(id)sender { jaseDesktopAction("open-jase",0); }
+// Announcements also appear while the app is in front; a click (or «Collega») lets
+// the waiting page continue to the consent dialog. Dismissing it does nothing.
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center willPresentNotification:(UNNotification *)notification withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler {
+    completionHandler(UNNotificationPresentationOptionBanner|UNNotificationPresentationOptionList);
+}
+- (void)userNotificationCenter:(UNUserNotificationCenter *)center didReceiveNotificationResponse:(UNNotificationResponse *)response withCompletionHandler:(void (^)(void))completionHandler {
+    NSString *key=response.notification.request.content.userInfo[@"discovery"];
+    if([key isKindOfClass:NSString.class]&&![response.actionIdentifier isEqual:UNNotificationDismissActionIdentifier])jaseDesktopNotificationClicked((char *)key.UTF8String);
+    completionHandler();
+}
 - (void)revokeSites:(id)sender { jaseDesktopAction("revoke-sites",0); }
+- (void)revokeSite:(id)sender { if(![self.selectedSite isEqual:@"*"]&&self.selectedSite.length)jaseDesktopRevokeSite((char *)self.selectedSite.UTF8String); }
+- (NSDictionary *)siteNamed:(NSString *)key { for(NSDictionary *site in self.sites)if([site[@"key"] isEqual:key])return site;return nil; }
+- (void)showSite:(NSString *)key {
+    [self.tabs selectTabViewItemWithIdentifier:@"activity"];self.selectedSite=key;
+    NSUInteger row=[self.sites indexOfObjectPassingTest:^BOOL(NSDictionary *s,NSUInteger i,BOOL *stop){return [s[@"key"] isEqual:key];}];
+    if(row!=NSNotFound)[self.siteTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+    [self reloadEvents];
+}
 - (void)quit:(id)sender { jaseDesktopQuit(); }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender { jaseDesktopQuit();return NSTerminateCancel; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return NO; }
@@ -235,7 +269,11 @@ static NSView *JaseSpacer(void) {
 - (void)reloadEvents {
     NSInteger selected=self.logTable.selectedRow;id selectedID=selected>=0&&selected<self.filteredEvents.count?self.filteredEvents[selected][@"id"]:nil;
     NSString *filter=self.filter.selectedItem.representedObject;NSMutableArray *list=[NSMutableArray array];
-    for(NSDictionary *event in self.events)if([filter isEqual:@"all"]||[event[@"category"] isEqual:filter]||([filter isEqual:@"error"]&&[event[@"level"] isEqual:@"error"]))[list addObject:event];
+    for(NSDictionary *event in self.events){
+        if(![self.selectedSite isEqual:@"*"]&&![(event[@"site"]?:@"") isEqual:self.selectedSite])continue;
+        if([filter isEqual:@"all"]||[event[@"category"] isEqual:filter]||([filter isEqual:@"error"]&&[event[@"level"] isEqual:@"error"]))[list addObject:event];
+    }
+    self.revokeSiteButton.enabled=[[self siteNamed:self.selectedSite][@"state"] isEqual:@"open"];
     BOOL atBottom=NSMaxY(self.logTable.visibleRect)>=NSHeight(self.logTable.bounds)-32;
     self.filteredEvents=list;[self.logTable reloadData];
     NSUInteger found=selectedID?[list indexOfObjectPassingTest:^BOOL(NSDictionary *e,NSUInteger idx,BOOL *stop){return [e[@"id"] isEqual:selectedID];}]:NSNotFound;
@@ -248,7 +286,7 @@ static NSView *JaseSpacer(void) {
         char *rawApproval=jaseDesktopApproval();NSData *approvalData=[[NSString stringWithUTF8String:rawApproval] dataUsingEncoding:NSUTF8StringEncoding];free(rawApproval);
         id approval=[NSJSONSerialization JSONObjectWithData:approvalData options:NSJSONReadingFragmentsAllowed error:nil];
         if([approval isKindOfClass:NSDictionary.class]){
-            self.consenting=YES;[self showPanel:nil];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=[NSString stringWithFormat:@"Collegare %@ al tuo modello?",approval[@"site"]];
+            self.consenting=YES;[self showPanel:nil];[self showSite:approval[@"origin"]];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=[NSString stringWithFormat:@"Collegare %@ al tuo modello?",approval[@"site"]];
             alert.informativeText=approval[@"text"];
             NSPopUpButton *models=[[[NSPopUpButton alloc] initWithFrame:NSMakeRect(0,0,360,30) pullsDown:NO] autorelease];
             for(NSDictionary *model in approval[@"models"])[models addItemWithTitle:model[@"name"]];alert.accessoryView=models;
@@ -272,10 +310,26 @@ static NSView *JaseSpacer(void) {
     if(reset){[self.events removeAllObjects];self.generation=[state[@"generation"] unsignedLongLongValue];self.firstState=NO;}
     [self.events addObjectsFromArray:state[@"events"]];if(self.events.count>300)[self.events removeObjectsInRange:NSMakeRange(0,self.events.count-300)];
     self.cursor=[state[@"cursor"] unsignedLongLongValue];if(reset||[state[@"events"] count])[self reloadEvents];
-    NSMutableArray *online=[NSMutableArray array];for(NSDictionary *c in state[@"connections"])if([c[@"connected"] boolValue])[online addObject:c[@"origin"]];
-    self.statusTitle.stringValue=online.count?@"Collegato a Jase":@"Jase Tunnel è in esecuzione";
-    self.statusDetail.stringValue=online.count?[online componentsJoinedByString:@" · "]:@"Apri Jase IA e scegli «Usa il mio modello»";
-    self.statusIcon.contentTintColor=online.count?NSColor.systemGreenColor:NSColor.secondaryLabelColor;
+    NSMutableArray *open=[NSMutableArray array],*sites=[NSMutableArray arrayWithArray:@[@{@"key":@"*",@"label":@"Tutte le attività",@"status":@"App e siti insieme"},@{@"key":@"",@"label":@"Jase Tunnel",@"status":@"Avvio, modelli e impostazioni"}]];
+    NSInteger waiting=0;
+    for(NSDictionary *site in state[@"sites"]){
+        [sites addObject:@{@"key":site[@"origin"],@"label":site[@"label"],@"status":site[@"status"],@"state":site[@"state"]}];
+        if([site[@"state"] isEqual:@"open"])[open addObject:[NSString stringWithFormat:@"%@ (%@)",site[@"label"],site[@"model"]?:@""]];
+        if([site[@"state"] isEqual:@"awaiting_approval"])waiting++;
+    }
+    if(![self.sites isEqual:sites]){
+        self.sites=sites;[self.siteTable reloadData];
+        if(![self siteNamed:self.selectedSite])self.selectedSite=@"*";
+        NSUInteger row=[sites indexOfObjectPassingTest:^BOOL(NSDictionary *s,NSUInteger i,BOOL *stop){return [s[@"key"] isEqual:self.selectedSite];}];
+        [self.siteTable selectRowIndexes:[NSIndexSet indexSetWithIndex:row==NSNotFound?0:row] byExtendingSelection:NO];
+        [self reloadEvents];
+    }
+    NSString *title=open.count==0?@"Jase Tunnel è in esecuzione":open.count==1?@"1 tunnel aperto":[NSString stringWithFormat:@"%lu tunnel aperti",(unsigned long)open.count];
+    if(waiting==1)title=[title stringByAppendingString:@" · un sito chiede il tunnel"];
+    else if(waiting>1)title=[title stringByAppendingFormat:@" · %ld siti chiedono il tunnel",(long)waiting];
+    self.statusTitle.stringValue=title;
+    self.statusDetail.stringValue=open.count?[open componentsJoinedByString:@"   ·   "]:@"Naviga normalmente: ti avviso quando una pagina accetta il tunnel";
+    self.statusIcon.contentTintColor=open.count?NSColor.systemGreenColor:NSColor.secondaryLabelColor;
     NSDictionary *stats=state[@"statistics"];
     self.statistics.stringValue=[NSString stringWithFormat:@"%@ invii   ·   %@ ricezioni   ·   %@ turni del modello   ·   %@ errori",stats[@"sent"],stats[@"received"],stats[@"modelTurns"],stats[@"errors"]];
     self.debugButton.state=[state[@"debug"] boolValue]?NSControlStateValueOn:NSControlStateValueOff;
@@ -283,12 +337,18 @@ static NSView *JaseSpacer(void) {
     self.privacy.stringValue=[state[@"debug"] boolValue]?@"I testi restano su questo Mac e possono contenere dati personali. Disattivando il log si svuota il registro; i file già scritti restano sul disco.":@"Registro privato sul Mac · Ultimi 300 eventi. Chiudendo la finestra, il tunnel resta attivo nella barra dei menu.";
     self.version.stringValue=[@"Jase Tunnel · " stringByAppendingString:state[@"version"]];
 }
-- (NSInteger)numberOfRowsInTableView:(NSTableView *)table { return table==self.modelTable?self.models.count:self.filteredEvents.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView *)table { return table==self.modelTable?self.models.count:table==self.siteTable?self.sites.count:self.filteredEvents.count; }
 - (NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
     NSTextField *label=[table makeViewWithIdentifier:column.identifier owner:self];
     if(!label){label=JaseLabel(@"",12,NSFontWeightRegular);label.identifier=column.identifier;label.selectable=NO;}
     label.textColor=NSColor.labelColor;
     if(table==self.modelTable){label.stringValue=self.models[row][column.identifier]?:@"";return label;}
+    if(table==self.siteTable){
+        NSDictionary *site=self.sites[row];BOOL open=[site[@"state"] isEqual:@"open"],asking=[site[@"state"] isEqual:@"awaiting_approval"];
+        NSMutableAttributedString *text=[[[NSMutableAttributedString alloc] initWithString:[NSString stringWithFormat:@"%@%@\n",open?@"● ":asking?@"◐ ":@"",site[@"label"]] attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:12 weight:NSFontWeightSemibold],NSForegroundColorAttributeName:open?NSColor.systemGreenColor:asking?NSColor.systemOrangeColor:NSColor.labelColor}] autorelease];
+        [text appendAttributedString:[[[NSAttributedString alloc] initWithString:site[@"status"]?:@"" attributes:@{NSFontAttributeName:[NSFont systemFontOfSize:10],NSForegroundColorAttributeName:NSColor.secondaryLabelColor}] autorelease]];
+        label.usesSingleLineMode=NO;label.cell.wraps=YES;label.cell.truncatesLastVisibleLine=YES;label.maximumNumberOfLines=2;label.attributedStringValue=text;label.toolTip=[NSString stringWithFormat:@"%@\n%@",site[@"key"],site[@"status"]?:@""];return label;
+    }
     NSDictionary *event=self.filteredEvents[row];
     if([column.identifier isEqual:@"time"]){NSDate *date=[self.dates dateFromString:event[@"time"]];label.stringValue=date?[self.clock stringFromDate:date]:@"";label.textColor=NSColor.secondaryLabelColor;}
     else {
@@ -300,6 +360,11 @@ static NSView *JaseSpacer(void) {
 }
 - (void)tableViewSelectionDidChange:(NSNotification *)notification {
     if(notification.object==self.modelTable){[self updateImportButton];return;}
+    if(notification.object==self.siteTable){
+        NSInteger row=self.siteTable.selectedRow;if(row<0||row>=self.sites.count)return;
+        NSString *key=self.sites[row][@"key"];if([key isEqual:self.selectedSite])return;
+        self.selectedSite=key;[self reloadEvents];return;
+    }
     NSInteger row=self.logTable.selectedRow;if(row<0||row>=self.filteredEvents.count)return;
     NSDictionary *event=self.filteredEvents[row];self.detail.string=[NSString stringWithFormat:@"%@\n%@",event[@"title"],event[@"detail"]?:@"Nessun dettaglio aggiuntivo."];
 }
@@ -337,4 +402,25 @@ int JaseConfirmReplacement(void) {
 }
 void JaseStartupError(const char *message) {
     @autoreleasepool {[NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];NSAlert *alert=[[[NSAlert alloc] init] autorelease];alert.messageText=@"Jase Tunnel non può avviarsi";alert.informativeText=[NSString stringWithUTF8String:message];[alert runModal];}
+}
+// Notification Center requires the app bundle. Permission is asked on the first
+// announcement; if it is refused, the announcement stays in the panel's journal.
+void JaseNotify(const char *identifier,const char *title,const char *body) {
+    @autoreleasepool {
+        NSString *key=[NSString stringWithUTF8String:identifier],*heading=[NSString stringWithUTF8String:title],*text=[NSString stringWithUTF8String:body];
+        dispatch_async(dispatch_get_main_queue(),^{
+            if(!NSBundle.mainBundle.bundleIdentifier){NSLog(@"Jase Tunnel: notifications need the app bundle");return;}
+            UNUserNotificationCenter *center=UNUserNotificationCenter.currentNotificationCenter;
+            if(desktop)center.delegate=desktop;
+            UNNotificationAction *connect=[UNNotificationAction actionWithIdentifier:@"connect" title:@"Collega" options:UNNotificationActionOptionForeground];
+            [center setNotificationCategories:[NSSet setWithObject:[UNNotificationCategory categoryWithIdentifier:@"compatible-site" actions:@[connect] intentIdentifiers:@[] options:0]]];
+            [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert|UNAuthorizationOptionSound completionHandler:^(BOOL granted,NSError *error){
+                NSLog(@"Jase Tunnel: notification authorization %@ %@",granted?@"granted":@"refused",error?:@"");
+                if(!granted)return;
+                UNMutableNotificationContent *content=[[[UNMutableNotificationContent alloc] init] autorelease];
+                content.title=heading;content.body=text;content.categoryIdentifier=@"compatible-site";content.userInfo=@{@"discovery":key};
+                [center addNotificationRequest:[UNNotificationRequest requestWithIdentifier:key content:content trigger:nil] withCompletionHandler:^(NSError *failure){NSLog(@"Jase Tunnel: notification %@",failure?:@"delivered");}];
+            }];
+        });
+    }
 }

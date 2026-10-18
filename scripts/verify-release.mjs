@@ -4,8 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const artifacts = {
-  "windows-x64": "Jase-Windows-x64.exe", "windows-arm64": "Jase-Windows-arm64.exe",
-  "macos-universal": "Jase-macOS.zip", "linux-x64": "Jase-Linux-x64.tar.gz", "linux-arm64": "Jase-Linux-arm64.tar.gz"
+  "windows-x64": "Jase-Tunnel-Windows-x64.exe", "windows-arm64": "Jase-Tunnel-Windows-arm64.exe",
+  "macos-universal": "Jase-Tunnel-macOS.zip", "linux-x64": "Jase-Tunnel-Linux-x64.tar.gz", "linux-arm64": "Jase-Tunnel-Linux-arm64.tar.gz"
 };
 export function releaseTag(tag, version) {
   const match = /^(dev-)?v(\d+\.\d+\.\d+)(?:-([A-Za-z0-9.-]+))?$/.exec(tag);
@@ -23,7 +23,7 @@ export function verifyRelease(directory, { tag, version, commit, run }) {
   }
   if (lstatSync(join(directory,"manifest.json")).size > 64000) throw new Error("Oversized release manifest");
   const manifest = JSON.parse(readFileSync(join(directory,"manifest.json"),"utf8"));
-  if (manifest.protocol !== "jase-companion-v1" || manifest.version !== version || manifest.commit !== commit || manifest.run !== run
+  if (manifest.protocol !== "jase-tunnel-v1" || manifest.version !== version || manifest.commit !== commit || manifest.run !== run
       || manifest.dirty !== false || manifest.macSigned !== true || manifest.signing !== (channel === "development" ? "development-loopback" : "development")
       || manifest.build !== `${version}+${commit.slice(0,12)}`) throw new Error("Release build does not match its commit, run or channel");
   if (!Array.isArray(manifest.artifacts) || manifest.artifacts.length !== 5 || new Set(manifest.artifacts.map(a=>a?.id)).size !== 5) throw new Error("Missing or repeated release platform");

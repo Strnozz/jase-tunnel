@@ -27,7 +27,7 @@ export function discoverTools(project) {
       for (const statement of source.statements) {
         if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
           const module = statement.moduleSpecifier.text;
-          if (['ai', '@langchain/core/tools', '@jase-tunnel/sdk/server'].includes(module)) for (const item of statement.importClause?.namedBindings?.elements ?? []) if (['tool', 'defineTool'].includes(item.propertyName?.text ?? item.name.text)) factories.add(item.name.text);
+          if (['ai', '@langchain/core/tools', 'jase-tunnel/server'].includes(module)) for (const item of statement.importClause?.namedBindings?.elements ?? []) if (['tool', 'defineTool'].includes(item.propertyName?.text ?? item.name.text)) factories.add(item.name.text);
         }
         if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) if (ts.isIdentifier(declaration.name) && declaration.initializer) {
           declarations.set(declaration.name.text, declaration.initializer);

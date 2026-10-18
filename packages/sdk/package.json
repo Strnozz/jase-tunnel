@@ -1,7 +1,7 @@
 {
-  "name": "@jase-tunnel/sdk",
-  "version": "0.2.0",
-  "description": "Installazione e strumenti web per Jase Tunnel, senza servizi di inferenza esterni.",
+  "name": "jase-tunnel",
+  "version": "0.3.0",
+  "description": "Collega la LLM locale dei visitatori al tuo servizio web tramite Jase Tunnel: un comando installa manifest, broker e pannello.",
   "type": "commonjs",
   "engines": {
     "node": ">=22"
@@ -10,34 +10,27 @@
     "jase-tunnel": "bin/cli.mjs"
   },
   "exports": {
-    "./legacy": {
-      "types": "./dist/legacy/index.d.ts",
-      "default": "./dist/legacy/index.js"
-    },
-    "./platforms": {
-      "types": "./dist/legacy/platforms.d.ts",
-      "default": "./dist/legacy/platforms.js"
-    },
-    "./releases": {
-      "types": "./dist/legacy/releases.d.ts",
-      "default": "./dist/legacy/releases.js"
-    },
     "./server": {
       "types": "./src/server.d.mts",
       "default": "./src/server.mjs"
+    },
+    "./node": {
+      "types": "./src/node.d.mts",
+      "default": "./src/node.mjs"
     },
     "./browser": {
       "types": "./src/browser.d.mts",
       "default": "./src/browser.mjs"
     },
+    "./widget": {
+      "types": "./src/widget.d.mts",
+      "default": "./src/widget.mjs"
+    },
     "./react": {
       "types": "./src/react.d.mts",
       "default": "./src/react.mjs"
     },
-    "./protocol": {
-      "types": "./dist/legacy/protocol.d.ts",
-      "default": "./dist/legacy/protocol.js"
-    }
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -71,29 +64,12 @@
     "url": "https://github.com/Strnozz/jase-tunnel.git",
     "directory": "packages/sdk"
   },
-  "typesVersions": {
-    "*": {
-      "legacy": [
-        "dist/legacy/index.d.ts"
-      ],
-      "platforms": [
-        "dist/legacy/platforms.d.ts"
-      ],
-      "releases": [
-        "dist/legacy/releases.d.ts"
-      ],
-      "server": [
-        "src/server.d.mts"
-      ],
-      "browser": [
-        "src/browser.d.mts"
-      ],
-      "react": [
-        "src/react.d.mts"
-      ],
-      "protocol": [
-        "dist/legacy/protocol.d.ts"
-      ]
-    }
-  }
+  "keywords": [
+    "llm",
+    "ollama",
+    "lm-studio",
+    "local-ai",
+    "tools",
+    "jase-tunnel"
+  ]
 }

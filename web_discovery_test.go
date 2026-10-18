@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -151,23 +152,23 @@ func TestWebDiscoveryNeedsLocalConsentAndDoesNotExposeInventory(t *testing.T) {
 	if len(links) != 1 || links[0].Model.Key != "ollama:fixture" {
 		t.Fatal("model grant missing")
 	}
-	// «Scollega siti» also removes Jase's own links and stops their inferences.
+	// «Scollega siti» removes every grant, of every site, and stops their inferences.
 	active, cancel := context.WithCancel(context.Background())
-	legacyActive, legacyCancel := context.WithCancel(context.Background())
-	legacy := link{Origin: "https://jaseengine.it", Token: strings.Repeat("d", 64), ConnectionID: "legacy"}
+	otherActive, otherCancel := context.WithCancel(context.Background())
+	other := link{Protocol: webProtocol, Origin: "https://tools.example.org", Broker: "/api/jase-tunnel/v1/", Model: links[0].Model, ExpiresAt: links[0].ExpiresAt, Token: strings.Repeat("d", 64), ConnectionID: strings.Repeat("e", 32)}
 	a.mu.Lock()
-	a.settings.Links = append(a.settings.Links, legacy)
-	a.runs = map[string]context.CancelFunc{links[0].Token: cancel, legacy.Token: legacyCancel}
+	a.settings.Links = append(a.settings.Links, other)
+	a.runs = map[string]context.CancelFunc{links[0].Token: cancel, other.Token: otherCancel}
 	a.mu.Unlock()
-	if !a.linkStored(legacy) {
-		t.Fatal("saved Jase link not recognised")
+	if !a.webGrantActive(other) {
+		t.Fatal("saved grant not recognised")
 	}
 	a.revokeLinks()
 	a.mu.RLock()
 	remaining := len(a.settings.Links)
 	a.mu.RUnlock()
-	if active.Err() == nil || legacyActive.Err() == nil || remaining != 0 || a.linkStored(legacy) {
-		t.Fatal("revocation did not remove every link and cancel active inference")
+	if active.Err() == nil || otherActive.Err() == nil || remaining != 0 || a.webGrantActive(other) {
+		t.Fatal("revocation did not remove every grant and cancel active inference")
 	}
 	a.cancel()
 }
@@ -239,5 +240,140 @@ func TestWebManifestFetchDoesNotFollowRedirects(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("SSRF to loopback permitted")
+	}
+}
+
+// A page that announces itself while the person browses produces one notification per
+// site a day. A click lets that page continue to pairing; consent is still required.
+func TestAnnouncedPageNotifiesOnceAndClickLetsItContinue(t *testing.T) {
+	a := newTestApp(t)
+	a.models = []model{{Key: "ollama:fixture", Name: "Fixture LLM", Engine: "ollama", Tools: true, ContextTokens: 8192}}
+	var notified []string
+	var mu sync.Mutex
+	a.notify = func(id, title, body string) { mu.Lock(); notified = append(notified, id+" "+title); mu.Unlock() }
+	mockWeb(t, a, func(r *http.Request) (*http.Response, error) { return response(fixtureManifest), nil })
+	announce := func(origin string, announce bool) (string, string) {
+		w := webRequest(a, "discover", origin, "", map[string]any{"protocol": webProtocol, "announce": announce})
+		var out struct{ Receipt, DiscoveryID string }
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		waitWebState(t, a, origin, out.Receipt, "compatible")
+		return out.Receipt, out.DiscoveryID
+	}
+	count := func() int { mu.Lock(); defer mu.Unlock(); return len(notified) }
+	announce("https://button.example.com", false)
+	if count() != 0 {
+		t.Fatal("a page button produced a notification")
+	}
+	receipt, id := announce("https://shop.example.com", true)
+	if count() != 1 || !strings.Contains(notified[0], "shop.example.com accetta Jase Tunnel") {
+		t.Fatalf("no notification for an announcing page: %v", notified)
+	}
+	a.webManager().mu.Lock()
+	a.web.checked = map[string]time.Time{} // let the same site announce again now
+	a.webManager().mu.Unlock()
+	announce("https://shop.example.com", true)
+	if count() != 1 {
+		t.Fatal("same site notified twice in a day")
+	}
+	if webRequest(a, "pair", "https://shop.example.com", receipt, map[string]any{"protocol": webProtocol, "ticket": strings.Repeat("c", 64)}).Code != 202 {
+		t.Fatal("compatible page could not ask for consent")
+	}
+	otherReceipt, other := announce("https://tools.example.org", true)
+	a.requestWebConnection(other)
+	waitWebState(t, a, "https://tools.example.org", otherReceipt, "requested")
+	if a.claimWebApproval() == nil {
+		t.Fatal("consent dialog missing for the paired page")
+	}
+	a.mu.RLock()
+	granted := len(a.settings.Links)
+	a.mu.RUnlock()
+	if granted != 0 || id == "" {
+		t.Fatal("a notification or click granted access")
+	}
+}
+
+// "localhost" may resolve to ::1 first while a development server listens only on
+// 127.0.0.1: the dialer must try every verified address, not only the first.
+func TestWebDialerTriesEveryVerifiedAddress(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if conn, err := listener.Accept(); err == nil {
+			conn.Close()
+		}
+	}()
+	_, port, _ := net.SplitHostPort(listener.Addr().String())
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := dialVerified(ctx, "tcp", net.JoinHostPort("localhost", port), true)
+	if err != nil {
+		t.Fatalf("IPv4-only local server unreachable through localhost: %v", err)
+	}
+	conn.Close()
+}
+
+// «Scollega siti» also tells each site's broker, so its pages stop seeing the grant.
+func TestRevocationReachesTheSitesBroker(t *testing.T) {
+	a := newTestApp(t)
+	revoked := make(chan string, 1)
+	mockWeb(t, a, func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/revoke") {
+			revoked <- r.URL.String() + " " + r.Header.Get("Authorization")
+		}
+		return response(`{"ok":true}`), nil
+	})
+	c := storedGrant(a, model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true})
+	a.revokeLinks()
+	select {
+	case got := <-revoked:
+		if got != "https://shop.example.com/api/jase-tunnel/v1/revoke Bearer "+c.Token {
+			t.Fatalf("revocation sent to the wrong place: %s", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("site never learned about the revocation")
+	}
+}
+
+// A reload, or the next page of a site verified moments ago, announces itself at once:
+// the tunnel answers from that verification instead of refusing for a minute.
+func TestRecentlyVerifiedSiteAnnouncesAgainWithoutNewFetch(t *testing.T) {
+	a := newTestApp(t)
+	fetches := 0
+	var notified []string
+	var mu sync.Mutex
+	a.notify = func(id, title, body string) { mu.Lock(); notified = append(notified, id); mu.Unlock() }
+	mockWeb(t, a, func(*http.Request) (*http.Response, error) {
+		mu.Lock()
+		fetches++
+		mu.Unlock()
+		return response(fixtureManifest), nil
+	})
+	origin := "https://shop.example.com"
+	first := webRequest(a, "discover", origin, "", map[string]any{"protocol": webProtocol})
+	var out struct{ Receipt, DiscoveryID, State string }
+	_ = json.Unmarshal(first.Body.Bytes(), &out)
+	waitWebState(t, a, origin, out.Receipt, "compatible")
+	again := webRequest(a, "discover", origin, "", map[string]any{"protocol": webProtocol, "announce": true})
+	_ = json.Unmarshal(again.Body.Bytes(), &out)
+	if again.Code != 202 || out.State != "compatible" {
+		t.Fatalf("reload refused: HTTP %d %s", again.Code, again.Body.String())
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		done := len(notified) == 1
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if fetches != 1 || len(notified) != 1 || notified[0] != out.DiscoveryID {
+		t.Fatalf("fetches %d, notifications %v", fetches, notified)
 	}
 }

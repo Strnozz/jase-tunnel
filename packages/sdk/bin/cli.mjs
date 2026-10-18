@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import ts from 'typescript';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, lstatSync, realpathSync, copyFileSync } from 'node:fs';
-import { resolve, relative, dirname, join, sep } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, lstatSync, realpathSync, copyFileSync, readdirSync } from 'node:fs';
+import { resolve, relative, dirname, join, sep, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { discoverTools } from '../src/discovery.mjs';
@@ -63,48 +63,166 @@ function mergeScan() {
   scan.warnings.forEach(w=>console.warn(w));
   return tools;
 }
+const widgetTag='<script type="module" src="/api/jase-tunnel/v1/client/widget.mjs"></script>';
+const skipped=new Set(['node_modules','.git','.next','.jase-tunnel','dist','build','coverage','vendor','tests','test','__tests__','fixtures']);
+function projectFiles(pattern, limit=3000) {
+  const found=[];
+  const walk=(directory,depth=0)=>{
+    if(depth>12) return;
+    for(const entry of readdirSync(directory,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name))) {
+      if(entry.isSymbolicLink() || entry.name.startsWith('.') || skipped.has(entry.name)) continue;
+      const path=join(directory,entry.name);
+      if(entry.isDirectory()) walk(path,depth+1);
+      else if(pattern.test(entry.name) && lstatSync(path).size<=1024*1024 && found.length<limit) found.push(path);
+    }
+  };
+  walk(root); return found;
+}
+const parse=file=>ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,/x$/.test(file)?ts.ScriptKind.TSX:/\.[cm]?ts$/.test(file)?ts.ScriptKind.TS:ts.ScriptKind.JS);
+const requireOf=node=>node&&ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text==='require'&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0])?node.arguments[0].text:undefined;
+// Names the file binds to the given modules: default/namespace imports and require().
+function bindings(ast,modules) {
+  const names=new Set(), named=new Set();
+  const visit=n=>{
+    if(ts.isImportDeclaration(n)&&ts.isStringLiteral(n.moduleSpecifier)&&modules.includes(n.moduleSpecifier.text)) {
+      const clause=n.importClause; if(clause?.name) names.add(clause.name.text);
+      const bound=clause?.namedBindings;
+      if(bound&&ts.isNamespaceImport(bound)) names.add(bound.name.text);
+      if(bound&&ts.isNamedImports(bound)) for(const item of bound.elements) named.add(item.name.text+'='+(item.propertyName?.text??item.name.text));
+    }
+    if(ts.isVariableDeclaration(n)&&modules.includes(requireOf(n.initializer))) {
+      if(ts.isIdentifier(n.name)) names.add(n.name.text);
+      else if(ts.isObjectBindingPattern(n.name)) for(const item of n.name.elements) if(ts.isIdentifier(item.name)) named.add(item.name.text+'='+(item.propertyName?.getText(ast)??item.name.text));
+    }
+    ts.forEachChild(n,visit);
+  };
+  visit(ast); return {names,named};
+}
+// After the imports and requires at the top: the helper exists before any server code runs.
+function preamblePosition(ast) {
+  let position=0;
+  for(const statement of ast.statements) {
+    const directive=ts.isExpressionStatement(statement)&&ts.isStringLiteral(statement.expression);
+    const imported=ts.isImportDeclaration(statement)||ts.isVariableStatement(statement)&&statement.declarationList.declarations.every(d=>requireOf(d.initializer));
+    if(!directive&&!imported) break;
+    position=statement.end;
+  }
+  return position;
+}
+const containing=(node,test)=>{while(node&&!test(node))node=node.parent;return node;};
+function findServer() {
+  const candidates=[];
+  for(const file of projectFiles(/\.(?:[cm]?js|[cm]?ts)$/)) {
+    const source=readFileSync(file,'utf8');
+    if(!/express|createServer/.test(source) || /\.(?:test|spec)\.|\.d\.[cm]?ts$/.test(file) || file.startsWith(join(root,'jase-tunnel.'))) continue;
+    const ast=parse(file), express=bindings(ast,['express']), http=bindings(ast,['http','node:http','https','node:https']);
+    let found;
+    const visit=n=>{
+      if(found) return;
+      if(ts.isVariableDeclaration(n)&&ts.isIdentifier(n.name)&&n.initializer&&ts.isCallExpression(n.initializer)&&ts.isIdentifier(n.initializer.expression)&&express.names.has(n.initializer.expression.text))
+        found={kind:'express',app:n.name.text,statement:containing(n,ts.isVariableStatement)};
+      if(ts.isCallExpression(n)) {
+        const callee=n.expression;
+        const create=ts.isPropertyAccessExpression(callee)&&callee.name.text==='createServer'&&ts.isIdentifier(callee.expression)&&http.names.has(callee.expression.text)
+          || ts.isIdentifier(callee)&&[...http.named].some(b=>b===callee.text+'=createServer');
+        if(create) found={kind:'http',call:n};
+      }
+      ts.forEachChild(n,visit);
+    };
+    visit(ast);
+    if(found) candidates.push({...found,file,ast,source,listens:/\.listen\(/.test(source)});
+  }
+  return candidates.sort((a,b)=>Number(b.listens)-Number(a.listens)||Number(b.kind==='express')-Number(a.kind==='express'))[0];
+}
+// The server loads the ES modules lazily, so CommonJS and ESM servers take the same lines.
+function serverChanges(server, configPath, typescript) {
+  if(server.source.includes('jase-tunnel/node')) return [];
+  let config=relative(dirname(server.file),configPath).split(sep).join('/');
+  if(typescript) config=config.replace(/\.ts$/,'');
+  if(!config.startsWith('.')) config='./'+config;
+  let helper=`// Added by jase-tunnel init: the module's routes (manifest, broker, panel) come first.\nconst jaseTunnel = Promise.all([import('jase-tunnel/node'), import(${JSON.stringify(config)})]).then(([{ nodeMiddleware }, { default: site }]) => nodeMiddleware(site));`;
+  if(server.kind==='http') helper+=`\nconst withJaseTunnel = handler => (req, res) => jaseTunnel.then(handle => handle(req, res, () => handler(req, res)), () => handler(req, res));`;
+  const position=preamblePosition(server.ast);
+  const edits=[[position,position?`\n\n${helper}`:`${helper}\n\n`]];
+  if(server.kind==='express') {
+    const statement=server.statement, line=server.source.lastIndexOf('\n',statement.getStart(server.ast))+1;
+    const indent=server.source.slice(line,statement.getStart(server.ast)).match(/^\s*/)[0];
+    edits.push([statement.end,`\n${indent}${server.app}.use((req, res, next) => jaseTunnel.then(handle => handle(req, res, next), next));`]);
+  } else {
+    const handler=[...server.call.arguments].reverse().find(a=>ts.isArrowFunction(a)||ts.isFunctionExpression(a)||ts.isIdentifier(a));
+    if(!handler) throw new Error(`${relative(root,server.file)}: createServer senza funzione di gestione. Collega a mano withJaseTunnel da jase-tunnel/node.`);
+    edits.push([handler.getStart(server.ast),'withJaseTunnel('],[handler.end,')']);
+  }
+  let text=server.source;
+  for(const [start,insert,end=start] of edits.sort((a,b)=>b[0]-a[0])) text=text.slice(0,start)+insert+text.slice(end);
+  return [[server.file,text,true]];
+}
+// The panel is one script tag before </body> in the server's HTML pages and templates.
+function pageChanges() {
+  const changes=[]; changes.present=0;
+  for(const file of projectFiles(/\.(?:html?|ejs|hbs|handlebars|njk|liquid|mustache)$/,200)) {
+    const source=readFileSync(file,'utf8'), end=source.toLowerCase().lastIndexOf('</body>');
+    if(source.includes('client/widget.mjs')) { changes.present++; continue; }
+    if(end<0) continue;
+    changes.push([file,source.slice(0,end)+widgetTag+'\n'+source.slice(end),true]);
+  }
+  return changes;
+}
 function init() {
   if(!existsSync(pkgFile)) throw new Error('Apri il terminale nella cartella del progetto Node.js.');
   const pkg=JSON.parse(readFileSync(pkgFile,'utf8'));
-  const next=!!(pkg.dependencies?.next ?? pkg.devDependencies?.next);
+  const depends=name=>!!(pkg.dependencies?.[name] ?? pkg.devDependencies?.[name]);
+  const next=depends('next');
   const app=['src/app','app'].map(p=>join(root,p)).find(existsSync);
   const typescript=existsSync(join(root,'tsconfig.json'));
-  const extension=typescript?'ts':'js', configName=`jase-tunnel.config.${typescript?'ts':'mjs'}`;
+  const extension=typescript?'ts':'js', configName=`jase-tunnel.config.${typescript?'ts':'mjs'}`, configPath=join(root,configName);
   const tools=mergeScan(), changes=toolChanges(tools,typescript);
-  changes.push([join(root,configName),`import { defineSite } from '@jase-tunnel/sdk/server';\nimport { tools } from './.jase-tunnel/tools${typescript?'':'.mjs'}';\n\nexport default defineSite({ name: ${JSON.stringify(String(pkg.name??'Il mio servizio').slice(0,80))}, origin: process.env.JASE_TUNNEL_ORIGIN, tools });\n`,false]);
+  changes.push([configPath,`import { defineSite } from 'jase-tunnel/server';\nimport { tools } from './.jase-tunnel/tools${typescript?'':'.mjs'}';\n\nexport default defineSite({ name: ${JSON.stringify(String(pkg.name??'Il mio servizio').slice(0,80))}, origin: process.env.JASE_TUNNEL_ORIGIN, tools });\n`,false]);
+  let summary;
   if(next && app) {
     const layout=['layout.tsx','layout.jsx','layout.js'].map(p=>join(app,p)).find(existsSync);
     if(!layout) throw new Error('Layout Next.js non trovato: usa un layout App Router prima di init.');
     const source=readFileSync(layout,'utf8');
-    if(!source.includes("@jase-tunnel/sdk/react")) {
+    if(!source.includes("jase-tunnel/react")) {
       const ast=ts.createSourceFile(layout,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
       let end;
       const visit=n=>{if(ts.isJsxElement(n) && n.openingElement.tagName.getText(ast)==='body') end=n.closingElement.getStart(ast); ts.forEachChild(n,visit);}; visit(ast);
       if(end===undefined) throw new Error('Body del layout non riconosciuto. Nessun file modificato: integra <JaseTunnel /> dal modulo React.');
       const body=source.slice(0,end)+'<JaseTunnel />'+source.slice(end);
       const anchor=ast.statements.find(s=>!ts.isExpressionStatement(s) || !ts.isStringLiteral(s.expression))?.getStart(ast)??0;
-      changes.push([layout,body.slice(0,anchor)+"import { JaseTunnel } from '@jase-tunnel/sdk/react';\n"+body.slice(anchor),true]);
+      changes.push([layout,body.slice(0,anchor)+"import { JaseTunnel } from 'jase-tunnel/react';\n"+body.slice(anchor),true]);
     }
     for(const [route,method] of [['api/jase-tunnel/v1/[...path]','GET, POST'],['.well-known/jase-tunnel.json','GET']]) {
-      const directory=join(app,route); let imp=relative(directory,join(root,configName)).split(sep).join('/').replace(/\.[jt]s$/,''); if(!imp.startsWith('.'))imp='./'+imp;
+      const directory=join(app,route); let imp=relative(directory,configPath).split(sep).join('/').replace(/\.[jt]s$/,''); if(!imp.startsWith('.'))imp='./'+imp;
       const code=`import site from ${JSON.stringify(imp)};\nexport const runtime = 'nodejs';\nexport const dynamic = 'force-dynamic';\nexport const GET = ${typescript?'(request: Request)':'request'} => site.handle(request);\n${method.includes('POST')?'export const POST = GET;\n':''}`;
       changes.push([join(directory,`route.${extension}`),code,false]);
     }
+    summary='Pulsante, pannello e broker Next.js configurati.';
   } else if(next) throw new Error('L’installazione automatica richiede Next.js App Router. Nessun file modificato.');
+  else {
+    const server=findServer();
+    if(server) {
+      changes.push(...serverChanges(server,configPath,typescript));
+      summary=`Broker collegato a ${server.kind==='express'?'Express':'node:http'} in ${relative(root,server.file)}.`;
+    } else summary='Server non riconosciuto: importa jase-tunnel.config nel tuo server e inoltra le Request a site.handle(request), oppure usa nodeMiddleware da jase-tunnel/node.';
+    const pages=pageChanges();
+    changes.push(...pages);
+    summary+=pages.length?` Pannello aggiunto a ${pages.length} ${pages.length===1?'pagina':'pagine'}.`:pages.present?' Pannello già presente nelle pagine.':` Aggiungi il pannello alle tue pagine prima di </body>:\n  ${widgetTag}`;
+  }
   const ignore=join(root,'.gitignore'), old=existsSync(ignore)?readFileSync(ignore,'utf8'):'';
   changes.push([ignore,old+(old.includes('.jase-tunnel/backups/')?'':`${old.endsWith('\n')||!old?'':'\n'}.jase-tunnel/backups/\n`),true]);
   // Check conflicts before npm changes package/lock; --dry-run never installs.
   commitFiles(changes, true);
   if(!flag('--dry-run') && !flag('--skip-install')) {
-    const spec=option('--package')??`https://github.com/Strnozz/jase-tunnel/releases/download/sdk-v${packageJSON.version}/jase-tunnel-sdk-${packageJSON.version}.tgz`;
+    const spec=option('--package')??`${packageJSON.name}@${packageJSON.version}`;
     const npmCLI=[process.env.npm_execpath?.replace(/npx-cli\.js$/,'npm-cli.js'),join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js')].find(p=>p&&existsSync(p));
     if(process.platform==='win32'&&!npmCLI) throw new Error('Percorso npm non disponibile. Avvia init tramite npx.');
     const installArgs=['install','--ignore-scripts','--no-audit','--no-fund','--save-exact',spec];
     const result=spawnSync(npmCLI?process.execPath:'npm',npmCLI?[npmCLI,...installArgs]:installArgs,{cwd:root,stdio:'inherit',shell:false});
-    if(result.error||result.status!==0) throw new Error('Installazione dipendenza non completata. Layout e route non sono stati modificati. Riprova init --package <pacchetto>.');
+    if(result.error||result.status!==0) throw new Error('Installazione dipendenza non completata. Nessun file del progetto è stato modificato. Riprova init --package <pacchetto>.');
   }
   if(!flag('--dry-run')) commitFiles(changes);
-  console.log(`Jase Tunnel: ${tools.length} strumenti rilevati.${next?' Pulsante, pannello e broker Next.js configurati.':' Importa jase-tunnel.config nel tuo server e inoltra le Request a site.handle(request).'}\nScansione aggiornata: npx jase-tunnel tools scan\nAggiunta manuale: npx jase-tunnel tools add ./src/tools.ts#strumento`);
+  console.log(`Jase Tunnel: ${tools.length} strumenti rilevati. ${summary}\nI visitatori con Jase Tunnel aperto vengono avvisati quando visitano le tue pagine.\nScansione aggiornata: npx jase-tunnel tools scan\nAggiunta manuale: npx jase-tunnel tools add ./src/tools.ts#strumento`);
 }
 try {
   const command=args[0];
@@ -126,5 +244,5 @@ try {
       const saved=registry().tools.filter(t=>t.name!==name); saved.push(entry); commitFiles(toolChanges(saved,existsSync(join(root,'tsconfig.json')))); console.log(`Aggiunto ${name}.`);
     } else if(operation==='remove') { const tools=registry().tools.map(t=>t.name===args[2]?{...t,enabled:false}:t); commitFiles(toolChanges(tools,existsSync(join(root,'tsconfig.json')))); }
     else throw new Error('Usa tools scan, list, add o remove.');
-  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name nome] [--schema ./schema.json] [--description testo] [--read-only]\n  tools remove nome');
+  } else console.log('Jase Tunnel\n  init [--dry-run] [--package <pacchetto o tarball>]\n  tools scan\n  tools list\n  tools add ./file.ts#export [--name nome] [--schema ./schema.json] [--description testo] [--read-only]\n  tools remove nome');
 } catch(error) { console.error(`Jase Tunnel: ${error.message}`); process.exitCode=1; }

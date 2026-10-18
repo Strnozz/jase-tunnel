@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unicode"
 	"unsafe"
@@ -63,6 +65,7 @@ type gtkAPI struct {
 	GtkToggleButtonGetActive    func(uintptr) int32
 	GtkNotebookNew              func() uintptr
 	GtkNotebookAppendPage       func(uintptr, uintptr, uintptr) int32
+	GtkNotebookSetCurrentPage   func(uintptr, int32)
 	GtkScrolledWindowNew        func(uintptr, uintptr) uintptr
 	GtkScrolledWindowSetPolicy  func(uintptr, int32, int32)
 	GtkListBoxNew               func() uintptr
@@ -148,6 +151,38 @@ func prepareDesktopUI() (err error) {
 	return nil
 }
 func showDesktopUI() { linuxShow.Store(true) }
+
+var linuxApplication atomic.Pointer[application]
+
+// notify-send reaches the desktop's freedesktop notification service. Where it supports
+// actions, «Collega» (or a click on the notification) lets the waiting page continue;
+// elsewhere the notification only informs. The panel's journal keeps every event.
+var linuxNotificationActions = sync.OnceValue(func() bool {
+	path, err := exec.LookPath("notify-send")
+	if err != nil {
+		return false
+	}
+	help, _ := exec.Command(path, "--help").CombinedOutput()
+	return bytes.Contains(help, []byte("--action"))
+})
+
+func notifyDesktop(id, title, body string) {
+	path, err := exec.LookPath("notify-send")
+	if err != nil {
+		return
+	}
+	go func() {
+		args := []string{"--app-name=Jase Tunnel", "--expire-time=20000"}
+		if linuxNotificationActions() {
+			args = append(args, "--action=default=Collega", "--action=connect=Collega", "--wait")
+		}
+		output, err := exec.Command(path, append(args, "--", title, body)...).Output()
+		answer := strings.TrimSpace(string(output))
+		if a := linuxApplication.Load(); err == nil && a != nil && (answer == "connect" || answer == "default") {
+			a.requestWebConnection(id)
+		}
+	}()
+}
 func stopDesktopUI() { linuxStop.Store(true) }
 func gtkDialog(parent uintptr, message string, confirm bool) bool {
 	d := gtk.GtkDialogNew()
@@ -200,6 +235,10 @@ type linuxPanel struct {
 	imports                                                                                                                     <-chan string
 	updating                                                                                                                    bool
 	destroyChildren                                                                                                             uintptr
+	// Activity tab: the site list and the Key of the console shown (allSites for all).
+	siteList, revokeOne, tabs uintptr
+	siteRows                  []panelSite
+	site                      string
 }
 
 func gtkConnect(object uintptr, signal string, callback any) {
@@ -393,6 +432,8 @@ func (p *linuxPanel) refresh() {
 	p.updating = true
 	defer func() { p.updating = false }()
 	if approval := p.a.claimWebApproval(); approval != nil {
+		p.site, p.siteRows = approval.Origin, nil
+		gtk.GtkNotebookSetCurrentPage(p.tabs, 1)
 		d := gtk.GtkDialogNew()
 		gtk.GtkWindowSetTitle(d, "Collegare "+approval.Site+" a Jase Tunnel?")
 		gtk.GtkWindowSetModal(d, 1)
@@ -432,7 +473,30 @@ func (p *linuxPanel) refresh() {
 		default:
 		}
 	}
-	s := p.a.panelSnapshot(int(gtk.GtkComboBoxGetActive(p.filter)))
+	s := p.a.panelSnapshot(int(gtk.GtkComboBoxGetActive(p.filter)), p.site)
+	if !reflect.DeepEqual(p.siteRows, s.Sites) {
+		selected := 0
+		rows := []string{}
+		for i, site := range s.Sites {
+			if site.Key == p.site {
+				selected = i
+			}
+			mark := ""
+			if site.Open {
+				mark = "● "
+			}
+			rows = append(rows, mark+site.Label+"\n"+site.Status)
+		}
+		p.siteRows, p.site = s.Sites, s.Sites[selected].Key
+		p.fill(p.siteList, rows, selected)
+	}
+	open := int32(0)
+	for _, site := range p.siteRows {
+		if site.Key == p.site && site.Open {
+			open = 1
+		}
+	}
+	gtk.GtkWidgetSetSensitive(p.revokeOne, open)
 	gtk.GtkLabelSetText(p.status, s.Title)
 	gtk.GtkLabelSetText(p.connection, s.Connection)
 	gtk.GtkLabelSetText(p.statistics, s.Statistics)
@@ -471,10 +535,11 @@ func (p *linuxPanel) refresh() {
 	p.updateImportButton()
 }
 func (a *application) runDesktopUI() {
+	linuxApplication.Store(a)
 	if a.ctx.Err() != nil {
 		return
 	}
-	p := &linuxPanel{a: a}
+	p := &linuxPanel{a: a, site: allSites}
 	p.window = gtk.GtkWindowNew(0)
 	gtk.GtkWindowSetTitle(p.window, "Jase Tunnel")
 	gtk.GtkWindowSetDefaultSize(p.window, 900, 740)
@@ -494,7 +559,6 @@ func (a *application) runDesktopUI() {
 	gtkPack(root, p.connection, false)
 	buttons := gtk.GtkBoxNew(0, 10)
 	gtkPack(root, buttons, false)
-	gtkButton(buttons, "Apri Jase", func() { go a.openJase() })
 	gtkButton(buttons, "Scollega siti", func() { go a.revokeLinks() })
 	p.add = gtkButton(buttons, "Aggiungi pesi…", p.chooseWeights)
 	gtkButton(buttons, trayLabels[2], a.cancel)
@@ -511,10 +575,18 @@ func (a *application) runDesktopUI() {
 	p.notice = gtkLabel("Apri Ollama o il server locale di LM Studio. Puoi aggiungere file GGUF o cartelle di pesi compatibili.")
 	gtkPack(models, p.notice, false)
 	gtk.GtkNotebookAppendPage(tabs, models, gtk.GtkLabelNew("Modelli"))
-	activity := gtk.GtkBoxNew(1, 10)
-	gtk.GtkContainerSetBorderWidth(activity, 14)
+	page := gtk.GtkBoxNew(1, 10)
+	gtk.GtkContainerSetBorderWidth(page, 14)
 	p.statistics = gtkLabel("")
-	gtkPack(activity, p.statistics, false)
+	gtkPack(page, p.statistics, false)
+	split := gtk.GtkBoxNew(0, 12)
+	gtkPack(page, split, true)
+	p.siteList = gtk.GtkListBoxNew()
+	sites := gtkScroll(p.siteList, 160)
+	gtk.GtkWidgetSetSizeRequest(sites, 230, -1)
+	gtkPack(split, sites, false)
+	activity := gtk.GtkBoxNew(1, 10)
+	gtkPack(split, activity, true)
 	tools := gtk.GtkBoxNew(0, 10)
 	gtkPack(activity, tools, false)
 	p.filter = gtk.GtkComboBoxTextNew()
@@ -523,6 +595,11 @@ func (a *application) runDesktopUI() {
 	}
 	gtk.GtkComboBoxSetActive(p.filter, 0)
 	gtkPack(tools, p.filter, false)
+	p.revokeOne = gtkButton(tools, "Scollega sito", func() {
+		if p.site != allSites && p.site != "" {
+			go a.revokeSite(p.site)
+		}
+	})
 	gtkButton(tools, "Svuota registro", func() { a.clearActivity(); p.refresh() })
 	p.events = gtk.GtkListBoxNew()
 	gtkPack(activity, gtkScroll(p.events, 160), true)
@@ -531,7 +608,8 @@ func (a *application) runDesktopUI() {
 	gtk.GtkTextViewSetWrapMode(p.detail, 2)
 	gtkPack(activity, gtkScroll(p.detail, 110), false)
 	p.detailText(-1)
-	gtk.GtkNotebookAppendPage(tabs, activity, gtk.GtkLabelNew("Attività"))
+	gtk.GtkNotebookAppendPage(tabs, page, gtk.GtkLabelNew("Attività"))
+	p.tabs = tabs
 	p.debug = gtk.GtkCheckButtonNewWithLabel("Log dettagliato, inclusi i testi")
 	p.thinking = gtk.GtkCheckButtonNewWithLabel("Ragionamento del modello, se supportato")
 	gtkPack(root, p.debug, false)
@@ -552,6 +630,14 @@ func (a *application) runDesktopUI() {
 		}
 	})
 	gtkConnect(p.filter, "changed", func(uintptr, uintptr) { p.refresh() })
+	gtkConnect(p.siteList, "row-selected", func(_ uintptr, row uintptr, _ uintptr) {
+		if !p.updating && row != 0 {
+			if index := int(gtk.GtkListBoxRowGetIndex(row)); index >= 0 && index < len(p.siteRows) {
+				p.site = p.siteRows[index].Key
+				p.refresh()
+			}
+		}
+	})
 	gtkConnect(p.events, "row-selected", func(_ uintptr, row uintptr, _ uintptr) {
 		if !p.updating {
 			index := -1

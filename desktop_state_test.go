@@ -10,10 +10,10 @@ import (
 
 func TestNativeJournalHasNoHTTPInterface(t *testing.T) {
 	a := newTestApp(t)
-	a.settings.Links = []link{{Origin: "https://jaseengine.it", Token: strings.Repeat("s", 64)}}
+	a.settings.Links = []link{{Origin: "https://shop.example.com", Token: strings.Repeat("s", 64)}}
 	a.files = []modelFile{{Name: "fixture.gguf", Path: "/private/full-path/fixture.gguf"}}
 	a.record("model", "info", "Private activity", "private fixture text")
-	for _, origin := range []string{"", "http://127.0.0.1:11439", "https://jaseengine.it", "https://evil.test"} {
+	for _, origin := range []string{"", "http://127.0.0.1:11439", "https://shop.example.com", "https://evil.test"} {
 		for _, path := range []string{"/control/", "/control/state", "/v1/status"} {
 			r := localRequest("GET", path, "", origin)
 			w := httptest.NewRecorder()
@@ -42,13 +42,13 @@ func TestNativeJournalHasNoHTTPInterface(t *testing.T) {
 func TestNativeDebugClearsConversationAndRejectsLateCallbacks(t *testing.T) {
 	a := newTestApp(t)
 	a.setDetailedLogging(true)
-	a.logTask(task{ID: "fixture", Model: model{Name: "Fixture"}, Messages: []message{{Role: "user", Content: "private fixture text"}}})
+	a.logTask("", task{ID: "fixture", Model: model{Name: "Fixture"}, Messages: []message{{Role: "user", Content: "private fixture text"}}})
 	raw, _ := json.Marshal(a.desktopState(0))
 	if !strings.Contains(string(raw), "private fixture text") {
 		t.Fatal("detailed native log missing")
 	}
 	a.setDetailedLogging(false)
-	a.recordDetailed("Risposta del modello", "private fixture text")
+	a.recordDetailed("", "Risposta del modello", "private fixture text")
 	raw, _ = json.Marshal(a.desktopState(0))
 	if strings.Contains(string(raw), "private fixture text") || a.debug.Load() {
 		t.Fatal("text remained after disabling logging")
@@ -91,8 +91,8 @@ func TestNativeJournalIsBoundedConcurrentAndSupportsCursor(t *testing.T) {
 
 func TestNativeConnectionsAreDeduplicatedAndThinkingIsControllable(t *testing.T) {
 	a := newTestApp(t)
-	a.settings.Links = []link{{Origin: "https://jaseengine.it"}, {Origin: "https://jaseengine.it"}}
-	a.serverContact("https://jaseengine.it")
+	a.settings.Links = []link{{Origin: "https://shop.example.com"}, {Origin: "https://shop.example.com"}}
+	a.serverContact("https://shop.example.com")
 	connections := a.desktopState(0)["connections"].([]map[string]any)
 	if len(connections) != 1 || connections[0]["connected"] != true {
 		t.Fatal("connection state is incorrect")
@@ -112,7 +112,7 @@ func TestNativeConnectionsAreDeduplicatedAndThinkingIsControllable(t *testing.T)
 func TestDesktopReuseRequiresMatchingBuildAndSiteMode(t *testing.T) {
 	previous := devBuild
 	t.Cleanup(func() { devBuild = previous })
-	state := desktopIdentity{Protocol: protocol, Desktop: true, DesktopUI: desktopUIName, Version: version}
+	state := desktopIdentity{Protocol: webProtocol, Desktop: true, DesktopUI: desktopUIName, Version: version}
 	devBuild = "false"
 	if !currentDesktop(state) {
 		t.Fatal("matching release should focus its window")

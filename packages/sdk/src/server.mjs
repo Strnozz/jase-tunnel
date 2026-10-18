@@ -1,7 +1,8 @@
 import { randomBytes, createHash } from 'node:crypto';
-import { CompanionBroker, CompanionError, isPersonalModel } from '../dist/legacy/index.js';
-import { WindowLimiter, readJsonBody, Refused } from '../dist/legacy/limits.js';
-import { TunnelReleaseCatalog } from '../dist/legacy/releases.js';
+import { readFileSync } from 'node:fs';
+import { TunnelBroker, TunnelError, isPersonalModel } from '../dist/core/index.js';
+import { WindowLimiter, readJsonBody, Refused } from '../dist/core/limits.js';
+import { TunnelReleaseCatalog } from '../dist/core/releases.js';
 import { toolList, defineTool, adaptTool } from './tools.mjs';
 export { defineTool, adaptTool };
 
@@ -15,22 +16,32 @@ const browserToken = request => {
   const token = request.headers.get('cookie')?.split(';').map(v => v.trim()).find(v => v.startsWith(COOKIE + '='))?.slice(COOKIE.length + 1);
   return /^[a-f0-9]{64}$/.test(token ?? '') ? token : undefined;
 };
+// The browser module, served by the broker itself so any page can load it with one tag:
+// <script type="module" src="/api/jase-tunnel/v1/client/widget.mjs"></script>.
+const clientFiles = new Map(['browser.mjs', 'widget.mjs'].map(name => [name, new URL('./' + name, import.meta.url)]));
+const clientCache = new Map();
+function clientFile(name) {
+  const file = clientFiles.get(name);
+  if (!file) return failure(404, 'not_found', 'Risorsa non trovata.');
+  if (!clientCache.has(name)) clientCache.set(name, readFileSync(file, 'utf8'));
+  return new Response(clientCache.get(name), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' } });
+}
 const local = u => u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname) && !!u.port;
 function originFor(request, configured) {
   const raw = request.headers.get('origin');
   let origin;
-  try { origin = new URL(raw); } catch { throw new CompanionError(403, 'origin_rejected', 'Apri il collegamento dalla pagina del servizio.'); }
+  try { origin = new URL(raw); } catch { throw new TunnelError(403, 'origin_rejected', 'Apri il collegamento dalla pagina del servizio.'); }
   const host = request.headers.get('host') ?? new URL(request.url).host;
-  if (raw !== origin.origin || origin.username || origin.password || !(origin.protocol === 'https:' || local(origin)) || (configured ? raw !== configured : origin.host !== host)) throw new CompanionError(403, 'origin_rejected', 'Origine della pagina non valida.');
+  if (raw !== origin.origin || origin.username || origin.password || !(origin.protocol === 'https:' || local(origin)) || (configured ? raw !== configured : origin.host !== host)) throw new TunnelError(403, 'origin_rejected', 'Origine della pagina non valida.');
   return raw;
 }
 const object = value => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new CompanionError(400, 'invalid_request', 'Richiesta non valida.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TunnelError(400, 'invalid_request', 'Richiesta non valida.');
   return value;
 };
 const body = (request, max = 64_000) => {
-  if (!request.headers.get('content-type')?.startsWith('application/json')) throw new CompanionError(415, 'json_required', 'Serve una richiesta JSON.');
-  return readJsonBody(request, max, () => { throw new CompanionError(400, 'invalid_request', 'JSON non valido.'); }).then(object);
+  if (!request.headers.get('content-type')?.startsWith('application/json')) throw new TunnelError(415, 'json_required', 'Serve una richiesta JSON.');
+  return readJsonBody(request, max, () => { throw new TunnelError(400, 'invalid_request', 'JSON non valido.'); }).then(object);
 };
 export function defineSite(options = {}) { return new TunnelSite(options); }
 
@@ -42,7 +53,7 @@ export class TunnelSite {
     if (!/^\/(?:[a-zA-Z0-9_-]+\/)+$/.test(this.path)) throw new Error('Percorso broker non valido.');
     if (this.name.length > 80) throw new Error('Nome del servizio troppo lungo.');
     this.options = options;
-    this.broker = options.broker ?? new CompanionBroker();
+    this.broker = options.broker ?? new TunnelBroker();
     this.grants = new Map(); this.chats = new Map(); this.pending = new Map(); this.busy = new Set(); this.tickets = new Map(); this.completed = new Map();
     this.limiter = new WindowLimiter(40, 60_000, 10_000);
     this.identities = new WindowLimiter(200, 60_000, 1);
@@ -69,12 +80,13 @@ export class TunnelSite {
       const url = new URL(request.url), action = url.pathname.slice(this.path.length);
       if (url.pathname === '/.well-known/jase-tunnel.json' && request.method === 'GET') return this.manifest();
       if (!url.pathname.startsWith(this.path)) return failure(404, 'not_found', 'Risorsa non trovata.');
+      if (action.startsWith('client/') && request.method === 'GET') return clientFile(action.slice('client/'.length));
       const browser = browserToken(request);
       if (action === 'download' && request.method === 'GET') {
         const channel = process.env.NODE_ENV === 'development' ? 'development' : 'stable';
         const release = await this.catalog.load(channel);
-        // Older desktop packages do not implement discovery and consent for other sites.
-        if (release.version && !/^(?:dev-)?v(?:0\.(?:[2-9]|\d{2,})\.|[1-9]\d*\.)/.test(release.version)) return url.searchParams.get('manifest') === '1' ? json({ ...release, status:'not-published', message:'Serve Jase Tunnel 0.2.0 o successivo. La nuova versione deve ancora essere pubblicata.', downloads:release.downloads.map(d=>({...d,available:false,url:undefined})) }) : failure(503,'upgrade_required','Serve Jase Tunnel 0.2.0 o successivo.');
+        // Older desktop packages cannot receive the announcements of the pages people visit.
+        if (release.version && !/^(?:dev-)?v(?:0\.(?:[3-9]|\d{2,})\.|[1-9]\d*\.)/.test(release.version)) return url.searchParams.get('manifest') === '1' ? json({ ...release, status:'not-published', message:'Serve Jase Tunnel 0.3.0 o successivo. La nuova versione deve ancora essere pubblicata.', downloads:release.downloads.map(d=>({...d,available:false,url:undefined})) }) : failure(503,'upgrade_required','Serve Jase Tunnel 0.3.0 o successivo.');
         if (url.searchParams.get('manifest') === '1') return json(release);
         const asset = release.downloads.find(a => a.id === url.searchParams.get('target') && a.available);
         return asset?.url ? new Response(null, { status: 302, headers: { Location: asset.url, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } }) : failure(503, 'release_unavailable', release.message ?? 'Download non disponibile.');
@@ -134,10 +146,11 @@ export class TunnelSite {
         this.completed.set(key,{fingerprint,expiresAt:grant.expiresAt});return json({ok:true});
       }
       if (action === 'models' && request.method === 'POST') return json({ ok: true }); // A grant stays pinned to its selected model.
+      if (action === 'revoke' && request.method === 'POST') { this.broker.revoke(token); this.grants.delete(hash(token)); return json({ ok: true }); }
       return failure(404, 'not_found', 'Risorsa non trovata.');
     } catch (error) {
       if (request.signal.aborted) return new Response(null, { status: 499 });
-      if (error instanceof CompanionError || error instanceof Refused) return failure(error.status, error.code, error.message);
+      if (error instanceof TunnelError || error instanceof Refused) return failure(error.status, error.code, error.message);
       this.options.onError?.(error);
       return failure(500, 'internal_error', 'Il servizio non ha completato la richiesta.');
     }

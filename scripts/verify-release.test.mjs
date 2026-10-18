@@ -9,11 +9,11 @@ import { releaseTag, verifyRelease } from "./verify-release.mjs";
 const commit="a".repeat(40),run="https://github.com/Strnozz/jase-tunnel/actions/runs/42";
 function fixture(t,development=false){
   const directory=mkdtempSync(join(tmpdir(),"jase-tunnel-release-check-"));t.after(()=>rmSync(directory,{recursive:true,force:true}));
-  const artifacts=Object.entries({"windows-x64":"Jase-Windows-x64.exe","windows-arm64":"Jase-Windows-arm64.exe","macos-universal":"Jase-macOS.zip","linux-x64":"Jase-Linux-x64.tar.gz","linux-arm64":"Jase-Linux-arm64.tar.gz"}).map(([id,filename])=>{
+  const artifacts=Object.entries({"windows-x64":"Jase-Tunnel-Windows-x64.exe","windows-arm64":"Jase-Tunnel-Windows-arm64.exe","macos-universal":"Jase-Tunnel-macOS.zip","linux-x64":"Jase-Tunnel-Linux-x64.tar.gz","linux-arm64":"Jase-Tunnel-Linux-arm64.tar.gz"}).map(([id,filename])=>{
     const bytes=Buffer.from(`fixture ${id}`);writeFileSync(join(directory,filename),bytes);
     return {id,filename,size:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex")};
   });
-  const manifest={protocol:"jase-companion-v1",version:"0.1.0",build:`0.1.0+${commit.slice(0,12)}`,commit,run,dirty:false,macSigned:true,signing:development?"development-loopback":"development",artifacts};
+  const manifest={protocol:"jase-tunnel-v1",version:"0.1.0",build:`0.1.0+${commit.slice(0,12)}`,commit,run,dirty:false,macSigned:true,signing:development?"development-loopback":"development",artifacts};
   const save=()=>writeFileSync(join(directory,"manifest.json"),JSON.stringify(manifest));save();
   writeFileSync(join(directory,"SHA256SUMS"),artifacts.map(a=>`${a.sha256}  ${a.filename}`).join("\n")+"\n");
   return {directory,manifest,save,options:{tag:development?"dev-v0.1.0-preview":"v0.1.0",version:"0.1.0",commit,run}};

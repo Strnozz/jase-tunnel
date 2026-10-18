@@ -24,7 +24,7 @@ func response(body string) *http.Response {
 }
 func newTestApp(t *testing.T) *application {
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &application{stateDir: t.TempDir(), port: 11439, ctx: ctx, cancel: cancel, client: &http.Client{}, running: map[string]bool{}, inference: make(chan struct{}, 1), paired: make(chan struct{})}
+	a := &application{stateDir: t.TempDir(), port: 11439, ctx: ctx, cancel: cancel, running: map[string]bool{}, inference: make(chan struct{}, 1)}
 	t.Cleanup(func() { stopTestApp(t, a) })
 	return a
 }
@@ -46,6 +46,15 @@ func stopTestApp(t *testing.T, a *application) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// storedGrant saves an unexpired consent for m, as answerWebConsent would.
+func storedGrant(a *application, m model) link {
+	c := link{Protocol: webProtocol, Origin: "https://shop.example.com", Broker: "/api/jase-tunnel/v1/", Model: m, ExpiresAt: time.Now().Add(10 * time.Minute).UnixMilli(), Token: strings.Repeat("b", 64), ConnectionID: strings.Repeat("c", 32)}
+	a.mu.Lock()
+	a.settings.Links = append(a.settings.Links, c)
+	a.mu.Unlock()
+	return c
+}
 func localRequest(method, path, body, origin string) *http.Request {
 	r := httptest.NewRequest(method, "http://127.0.0.1:11439"+path, strings.NewReader(body))
 	if origin != "" {
@@ -59,26 +68,27 @@ func localRequest(method, path, body, origin string) *http.Request {
 
 func TestLoopbackOriginAndRebindingProtection(t *testing.T) {
 	a := newTestApp(t)
-	for _, origin := range []string{"https://evil.test", "null", "https://jaseengine.it.evil.test"} {
+	// Websites reach the tunnel only through /tunnel/v1/: the management API refuses them.
+	for _, origin := range []string{"https://evil.test", "null", "https://shop.example.com"} {
 		w := httptest.NewRecorder()
 		a.ServeHTTP(w, localRequest("GET", "/v1/status", "", origin))
-		if w.Code != 403 {
-			t.Fatalf("accepted hostile origin %s", origin)
+		if w.Code != 403 || w.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("management API answered %s", origin)
 		}
 	}
 	w := httptest.NewRecorder()
-	r := localRequest("GET", "/v1/status", "", "https://jaseengine.it")
+	r := localRequest("GET", "/v1/status", "", "")
 	r.Host = "evil.test:11439"
 	a.ServeHTTP(w, r)
 	if w.Code != 403 {
 		t.Fatal("accepted rebinding Host")
 	}
 	w = httptest.NewRecorder()
-	a.ServeHTTP(w, localRequest("GET", "/v1/status", "", "https://jaseengine.it"))
-	if w.Code != 200 || w.Header().Get("Access-Control-Allow-Origin") != "https://jaseengine.it" {
-		t.Fatal("Jase cannot detect local helper")
+	a.ServeHTTP(w, localRequest("GET", "/v1/status", "", ""))
+	if w.Code != 200 || !strings.Contains(w.Body.String(), webProtocol) {
+		t.Fatal("a local process cannot identify the running tunnel")
 	}
-	// The status page works under both loopback names, but never pairs.
+	// The status page works under both loopback names.
 	for _, local := range []string{"http://127.0.0.1:11439", "http://localhost:11439"} {
 		w = httptest.NewRecorder()
 		r := localRequest("POST", "/v1/show-window", "{}", local)
@@ -87,13 +97,6 @@ func TestLoopbackOriginAndRebindingProtection(t *testing.T) {
 		if w.Code != 404 {
 			t.Fatalf("status page at %s rejected: HTTP %d", local, w.Code)
 		}
-		w = httptest.NewRecorder()
-		r = localRequest("POST", "/v1/pair", `{"origin":"`+local+`","ticket":"`+strings.Repeat("a", 64)+`"}`, local)
-		r.Host = strings.TrimPrefix(local, "http://")
-		a.ServeHTTP(w, r)
-		if w.Code != 400 {
-			t.Fatalf("status page at %s paired", local)
-		}
 	}
 	w = httptest.NewRecorder()
 	a.ServeHTTP(w, localRequest("POST", "/v1/quit", "{}", ""))
@@ -101,315 +104,69 @@ func TestLoopbackOriginAndRebindingProtection(t *testing.T) {
 		t.Fatal("accepted a CSRF request")
 	}
 }
-func TestOriginIsRestrictedToJaseAndLoopback(t *testing.T) {
-	// A release accepts only Jase; loopback sites only in a development build.
-	for _, origin := range []string{"http://localhost:3117", "http://127.0.0.1:3117"} {
-		if allowedOrigin(origin) {
-			t.Fatalf("release build accepted %s", origin)
+
+// The single-site pairing and import endpoints of releases before 0.3 no longer exist.
+func TestPreviousSiteEndpointsAreGone(t *testing.T) {
+	a := newTestApp(t)
+	for _, path := range []string{"/v1/pair", "/v1/open-jase", "/v1/import-model"} {
+		w := httptest.NewRecorder()
+		a.ServeHTTP(w, localRequest("POST", path, `{}`, "http://127.0.0.1:11439"))
+		if w.Code != 404 {
+			t.Fatalf("%s still answers: HTTP %d", path, w.Code)
 		}
-	}
-	devBuild = "true"
-	t.Cleanup(func() { devBuild = "false" })
-	for _, origin := range []string{"https://jaseengine.it", "http://localhost:3117", "http://127.0.0.1:3117"} {
-		if !allowedOrigin(origin) {
-			t.Fatalf("rejected %s", origin)
-		}
-	}
-	for _, origin := range []string{"https://evil.test", "http://jaseengine.it", "https://user@jaseengine.it", "https://jaseengine.it/path", "https://jaseengine.it?token=1", "http://192.168.1.1:80", "http://localhost:3117/"} {
-		if allowedOrigin(origin) {
-			t.Fatalf("accepted %s", origin)
+		w = httptest.NewRecorder()
+		a.ServeHTTP(w, localRequest("POST", path, `{}`, "https://shop.example.com"))
+		if w.Code != 403 {
+			t.Fatalf("%s accepted a website", path)
 		}
 	}
 }
-func TestPairingCannotBeSentToAnOutsideService(t *testing.T) {
+func TestRemoteCallsReachOnlyAStoredGrantsBroker(t *testing.T) {
 	a := newTestApp(t)
-	w := httptest.NewRecorder()
-	a.ServeHTTP(w, localRequest("POST", "/v1/pair", `{"origin":"https://evil.test","ticket":"`+strings.Repeat("a", 64)+`"}`, "https://jaseengine.it"))
-	if w.Code != 400 {
-		t.Fatal("accepted remote pairing destination")
+	calls := 0
+	mockWeb(t, a, func(*http.Request) (*http.Response, error) { calls++; return response(`{"task":null}`), nil })
+	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true}
+	unsaved := link{Protocol: webProtocol, Origin: "https://shop.example.com", Broker: "/api/jase-tunnel/v1/", Model: m, ExpiresAt: time.Now().Add(time.Minute).UnixMilli(), Token: strings.Repeat("e", 64)}
+	for _, c := range []link{{Origin: "https://evil.test"}, {Protocol: webProtocol, Origin: "https://shop.example.com", Broker: "//evil.test/", Model: m, ExpiresAt: unsaved.ExpiresAt, Token: unsaved.Token}, unsaved} {
+		if err := a.remote(a.ctx, c, "poll", nil, nil); err == nil {
+			t.Fatalf("remote call allowed for %+v", c)
+		}
 	}
-	if err := a.remote(a.ctx, link{Origin: "https://evil.test"}, "poll", nil, nil); err == nil {
-		t.Fatal("external service allowed")
+	if calls != 0 {
+		t.Fatal("request left the computer without a stored grant")
 	}
 }
 func TestLongPollReconnectsAfterEachResponse(t *testing.T) {
 	a := newTestApp(t)
-	a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if !r.Close {
-			t.Fatal("long poll retained a connection to a retiring server")
+	mockWeb(t, a, func(r *http.Request) (*http.Response, error) {
+		if !r.Close || r.URL.String() != "https://shop.example.com/api/jase-tunnel/v1/poll" {
+			t.Fatal("long poll retained a connection to a retiring server or left the broker")
 		}
 		return response(`{"task":null}`), nil
 	})
+	c := storedGrant(a, model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true})
 	var output any
-	if err := a.remote(a.ctx, link{Origin: "https://jaseengine.it"}, "poll", nil, &output); err != nil {
+	if err := a.remote(a.ctx, c, "poll", nil, &output); err != nil {
 		t.Fatal(err)
 	}
 }
-func TestPairingStoresOnlyDeviceCredentialsLocally(t *testing.T) {
+
+// Connections saved by releases before 0.3 named a single site: a restart discards
+// them with their credentials and keeps only unexpired grants, in a private file.
+func TestStartupKeepsOnlyCurrentGrants(t *testing.T) {
 	a := newTestApp(t)
-	a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Scheme != "https" || r.URL.Host != "jaseengine.it" {
-			t.Errorf("unexpected remote service %s", r.URL)
-		}
-		if r.URL.Path == "/api/companion/pair" {
-			return response(`{"protocol":"jase-companion-v1","token":"` + strings.Repeat("b", 64) + `","connectionId":"` + strings.Repeat("c", 32) + `"}`), nil
-		}
-		select {
-		case <-time.After(20 * time.Millisecond):
-		case <-r.Context().Done():
-			return nil, r.Context().Err()
-		}
-		return response(`{"task":null}`), nil
-	})
-	w := httptest.NewRecorder()
-	a.ServeHTTP(w, localRequest("POST", "/v1/pair", `{"origin":"https://jaseengine.it","ticket":"`+strings.Repeat("a", 64)+`"}`, "https://jaseengine.it"))
-	if w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
+	grant := storedGrant(a, model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true})
+	a.mu.Lock()
+	a.settings.Links = append(a.settings.Links, link{Origin: "https://previous.example.com", Token: strings.Repeat("d", 64), ConnectionID: strings.Repeat("f", 32)})
+	a.mu.Unlock()
+	a.dropInvalidLinks()
 	bytes, err := os.ReadFile(filepath.Join(a.stateDir, "connections.json"))
-	if err != nil || !strings.Contains(string(bytes), strings.Repeat("b", 64)) {
-		t.Fatal("missing private reconnect credential")
-	}
-	if strings.Contains(w.Body.String(), strings.Repeat("b", 64)) {
-		t.Fatal("device credential exposed to browser")
-	}
-	status := httptest.NewRecorder()
-	a.ServeHTTP(status, localRequest("GET", "/v1/status", "", "https://jaseengine.it"))
-	if !strings.Contains(status.Body.String(), strings.Repeat("c", 32)) || strings.Contains(status.Body.String(), strings.Repeat("b", 64)) {
-		t.Fatal("reconnect discovery must expose only public connection identifiers")
+	if err != nil || !strings.Contains(string(bytes), grant.Token) || strings.Contains(string(bytes), strings.Repeat("d", 64)) {
+		t.Fatal("previous connection survived or grant lost")
 	}
 	info, _ := os.Stat(filepath.Join(a.stateDir, "connections.json"))
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("private file permissions")
-	}
-}
-func TestOllamaDiscoveryExcludesCloudAndEmbeddingOnlyModels(t *testing.T) {
-	previous, limit := engineTransport, contextLimit
-	t.Cleanup(func() { engineTransport, contextLimit = previous, limit })
-	contextLimit = func() int { return 32768 }
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "127.0.0.1:11434" {
-			t.Fatalf("nonlocal model service %s", r.URL)
-		}
-		if r.URL.Path == "/api/tags" {
-			return response(`{"models":[{"name":"local-qwen","size":123},{"name":"remote:cloud","remote_host":"https://ollama.com"}]}`), nil
-		}
-		return response(`{"capabilities":["completion","tools"],"model_info":{"qwen.context_length":65536}}`), nil
-	})
-	models := ollamaModels(context.Background())
-	if len(models) != 1 || models[0].Key != "ollama:local-qwen" || !models[0].Tools || models[0].ContextTokens != 32768 {
-		t.Fatalf("bad discovery: %+v", models)
-	}
-}
-func TestOllamaToolCallAndStructuredOutput(t *testing.T) {
-	a := newTestApp(t)
-	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true}
-	a.models = []model{m}
-	previous := engineTransport
-	t.Cleanup(func() { engineTransport = previous })
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.String() != ollamaURL+"/api/chat" {
-			t.Fatal("wrong local endpoint")
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "qwen" || body["stream"] != false || body["format"] == nil {
-			t.Fatal("missing local model or schema")
-		}
-		return response(`{"message":{"content":"<think>private reasoning</think>","tool_calls":[{"function":{"name":"web_search","arguments":{"query":"fixture"}}}]}}`), nil
-	})
-	answer, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "test"}}, MaxTokens: 100, ContextTokens: 8192, Schema: map[string]any{"type": "object"}})
-	if err != nil || len(answer.ToolCalls) != 1 || answer.ToolCalls[0].Name != "web_search" || answer.Content != "" {
-		t.Fatalf("bad local result: %+v %v", answer, err)
-	}
-}
-func TestLMStudioKeepsDistinctToolCallIdentifiers(t *testing.T) {
-	a := newTestApp(t)
-	m := model{Key: "lmstudio:qwen", Name: "qwen", Engine: "lmstudio", ContextTokens: 16384, Tools: true}
-	a.models = []model{m}
-	previous := engineTransport
-	t.Cleanup(func() { engineTransport = previous })
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path == "/api/v1/models" {
-			return response(`{"models":[{"key":"qwen","loaded_instances":[{"id":"qwen-loaded","config":{"context_length":32768}}]}]}`), nil
-		}
-		if r.URL.String() != studioURL+"/v1/chat/completions" {
-			t.Fatal("wrong local endpoint")
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "qwen-loaded" {
-			t.Fatal("chat did not select the prepared instance")
-		}
-		messages := body["messages"].([]any)
-		calls := messages[1].(map[string]any)["tool_calls"].([]any)
-		first := calls[0].(map[string]any)["id"]
-		second := calls[1].(map[string]any)["id"]
-		if first == second || messages[2].(map[string]any)["tool_call_id"] != first || messages[3].(map[string]any)["tool_call_id"] != second {
-			t.Fatal("tool result attached to wrong call")
-		}
-		return response(`{"choices":[{"message":{"content":"done"}}]}`), nil
-	})
-	_, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "test"}, {Role: "assistant", ToolCalls: []toolCall{{Name: "web_search", Arguments: map[string]any{}}, {Name: "web_search", Arguments: map[string]any{}}}}, {Role: "tool", Name: "web_search", Content: "first"}, {Role: "tool", Name: "web_search", Content: "second"}}, MaxTokens: 100, ContextTokens: 8192})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-func TestLMStudioLoadsInstalledModelWithEnoughContext(t *testing.T) {
-	previous := engineTransport
-	t.Cleanup(func() { engineTransport = previous })
-	loads := 0
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "127.0.0.1:1234" {
-			t.Fatal("model load left the computer")
-		}
-		if r.URL.Path == "/api/v1/models" {
-			return response(`{"models":[{"key":"qwen","loaded_instances":[{"id":"too-small","config":{"context_length":4096}}]}]}`), nil
-		}
-		if r.URL.Path != "/api/v1/models/load" {
-			t.Fatal("unexpected model endpoint")
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "qwen" || body["context_length"] != float64(32768) || body["echo_load_config"] != true {
-			t.Fatal("model loaded with the wrong context")
-		}
-		loads++
-		return response(`{"status":"loaded","instance_id":"qwen-ready","load_config":{"context_length":32768}}`), nil
-	})
-	id, loaded, err := studioInstance(context.Background(), "qwen", 32768, "")
-	if err != nil || id != "qwen-ready" || !loaded || loads != 1 {
-		t.Fatalf("model preparation failed: %s %v", id, err)
-	}
-	if _, _, err := studioInstance(context.Background(), "uninstalled", 32768, ""); err == nil || loads != 1 {
-		t.Fatal("attempted to load an uninstalled model")
-	}
-}
-
-// A larger context replaces the instance Jase loaded before, never one the person
-// loaded in LM Studio, and a request cannot exceed the published context budget.
-func TestLMStudioReplacesOnlyItsOwnSmallerInstance(t *testing.T) {
-	previous := engineTransport
-	t.Cleanup(func() { engineTransport = previous })
-	var calls []string
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		var body map[string]any
-		if r.Body != nil {
-			_ = json.NewDecoder(r.Body).Decode(&body)
-		}
-		switch r.URL.Path {
-		case "/api/v1/models":
-			return response(`{"models":[{"key":"qwen","loaded_instances":[{"id":"person","config":{"context_length":4096}},{"id":"jase-small","config":{"context_length":8192}}]}]}`), nil
-		case "/api/v1/models/unload":
-			calls = append(calls, "unload "+body["instance_id"].(string))
-			return response(`{"instance_id":"jase-small"}`), nil
-		case "/api/v1/models/load":
-			calls = append(calls, "load")
-			return response(`{"status":"loaded","instance_id":"jase-large","load_config":{"context_length":16384}}`), nil
-		case "/v1/chat/completions":
-			return response(`{"choices":[{"message":{"content":"done"}}]}`), nil
-		}
-		t.Fatalf("unexpected model endpoint %s", r.URL.Path)
-		return nil, nil
-	})
-	a := newTestApp(t)
-	m := model{Key: "lmstudio:qwen", Name: "qwen", Engine: "lmstudio", ContextTokens: 16384, Tools: true}
-	a.models = []model{m}
-	a.studioLoaded = map[string]string{"qwen": "jase-small"}
-	if _, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 16384}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(calls, ",") != "unload jase-small,load" || a.studioLoaded["qwen"] != "jase-large" {
-		t.Fatalf("instances not replaced: %v %v", calls, a.studioLoaded)
-	}
-	calls = nil
-	a.studioLoaded = map[string]string{}
-	if _, _, err := studioInstance(context.Background(), "qwen", 16384, ""); err != nil || strings.Join(calls, ",") != "load" {
-		t.Fatalf("unloaded an instance Jase did not load: %v %v", calls, err)
-	}
-	calls = nil
-	if _, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 32768}); err == nil || len(calls) != 0 {
-		t.Fatal("context above the published budget reached the engine")
-	}
-}
-func TestLocalModelRequestsNeverFollowRedirects(t *testing.T) {
-	previous := engineTransport
-	t.Cleanup(func() { engineTransport = previous })
-	calls := 0
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		calls++
-		return &http.Response{StatusCode: 302, Header: http.Header{"Location": []string{"https://evil.test"}}, Body: io.NopCloser(strings.NewReader(""))}, nil
-	})
-	var output any
-	if localJSON(context.Background(), ollamaURL, "/api/chat", map[string]any{}, &output, 1000) == nil || calls != 1 {
-		t.Fatal("redirect followed")
-	}
-	if localJSON(context.Background(), "https://evil.test", "/api/chat", nil, &output, 1000) == nil {
-		t.Fatal("external model endpoint allowed")
-	}
-}
-func TestDefaultDirectoryScanKeepsPathsLocalAndDoesNotTraverseSymlinkDirectories(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
-	_ = os.WriteFile(filepath.Join(root, "qwen.gguf"), []byte("fixture"), 0600)
-	_ = os.WriteFile(filepath.Join(root, "mmproj.gguf"), []byte("not a chat model"), 0600)
-	_ = os.Mkdir(filepath.Join(root, "safetensors"), 0700)
-	_ = os.WriteFile(filepath.Join(root, "safetensors", "config.json"), []byte("{}"), 0600)
-	_ = os.WriteFile(filepath.Join(root, "safetensors", "model.safetensors"), []byte("fixture"), 0600)
-	_ = os.WriteFile(filepath.Join(outside, "private.gguf"), []byte("outside"), 0600)
-	if err := os.Symlink(outside, filepath.Join(root, "other")); err != nil {
-		t.Skip("symlinks unavailable")
-	}
-	files := scanModelFiles([]string{root})
-	if len(files) != 2 {
-		t.Fatalf("unexpected model files: %+v", files)
-	}
-	encoded, _ := json.Marshal(files)
-	if strings.Contains(string(encoded), root) || strings.Contains(string(encoded), outside) || strings.Contains(string(encoded), "private.gguf") {
-		t.Fatal("paths or outside files exposed")
-	}
-}
-
-func TestContextFollowsMemoryAndThinkingIsOffOnlyWhereDeclared(t *testing.T) {
-	previous, limit := engineTransport, contextLimit
-	t.Cleanup(func() { engineTransport, contextLimit = previous, limit })
-	contextLimit = func() int { return 16384 }
-	engineTransport = roundTrip(func(r *http.Request) (*http.Response, error) {
-		switch {
-		case r.URL.Path == "/api/tags":
-			return response(`{"models":[{"name":"thinker"},{"name":"plain"}]}`), nil
-		case r.URL.Path == "/api/show":
-			var body map[string]string
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["model"] == "thinker" {
-				return response(`{"capabilities":["completion","tools","thinking"],"model_info":{"x.context_length":131072}}`), nil
-			}
-			return response(`{"capabilities":["completion","tools"],"model_info":{"x.context_length":131072}}`), nil
-		}
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		_, think := body["think"]
-		if think != (body["model"] == "thinker") {
-			t.Errorf("think option for %v: %v", body["model"], think)
-		}
-		return response(`{"message":{"content":"ok"}}`), nil
-	})
-	a := newTestApp(t)
-	a.models = ollamaModels(context.Background())
-	if len(a.models) != 2 {
-		t.Fatalf("models: %+v", a.models)
-	}
-	for _, m := range a.models {
-		if m.ContextTokens != 16384 || !m.Tools {
-			t.Fatalf("context not capped to memory: %+v", m)
-		}
-		if _, err := a.infer(a.ctx, task{Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 16384}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	encoded, _ := json.Marshal(a.models[0])
-	if strings.Contains(string(encoded), "hinking") {
-		t.Fatal("local capability sent to Jase")
 	}
 }
 
@@ -421,7 +178,7 @@ func TestOneFailedStatusCheckDoesNotCancelInference(t *testing.T) {
 	t.Cleanup(func() { statusEvery = every })
 	statusEvery = 20 * time.Millisecond
 	var checks atomic.Int32
-	a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) {
+	mockWeb(t, a, func(r *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(r.URL.Path, "/active") {
 			if checks.Add(1) == 1 {
 				return nil, io.ErrUnexpectedEOF // a network blip
@@ -442,7 +199,7 @@ func TestOneFailedStatusCheckDoesNotCancelInference(t *testing.T) {
 		answered.Store(true)
 		return response(`{"message":{"content":"done"}}`), nil
 	})
-	a.handleTask(link{Origin: "https://jaseengine.it", Token: strings.Repeat("b", 64)}, task{ID: "t", Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 16384, ExpiresAt: time.Now().Add(time.Minute).UnixMilli()})
+	a.handleTask(storedGrant(a, m), task{ID: "t", Model: m, Messages: []message{{Role: "user", Content: "hi"}}, MaxTokens: 10, ContextTokens: 16384, ExpiresAt: time.Now().Add(time.Minute).UnixMilli()})
 	if !answered.Load() || checks.Load() < 2 {
 		t.Fatalf("inference cancelled after one failed check (checks %d)", checks.Load())
 	}
@@ -469,13 +226,13 @@ func TestLogMarksEachQueryAndShowsThinkingOnlyInDebug(t *testing.T) {
 		a.think.Store(true)
 		m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true, Thinking: true}
 		a.models = []model{m}
-		a.client.Transport = roundTrip(func(r *http.Request) (*http.Response, error) { return response(`{"ok":true,"active":true}`), nil })
-		a.handleTask(link{Origin: "https://jaseengine.it", Token: strings.Repeat("b", 64)}, task{ID: strings.Repeat("9", 64), Trace: &trace{Kind: "goal", Ref: "1a2b3c4d", Turn: 3},
+		mockWeb(t, a, func(r *http.Request) (*http.Response, error) { return response(`{"ok":true,"active":true}`), nil })
+		a.handleTask(storedGrant(a, m), task{ID: strings.Repeat("9", 64),
 			Model: m, Messages: []message{{Role: "user", Content: "private fixture question"}}, MaxTokens: 10, ContextTokens: 16384, ExpiresAt: time.Now().Add(time.Minute).UnixMilli()})
 		return output.String()
 	}
 	quiet := run(false)
-	for _, want := range []string{"===== Start query · Goal 1a2b3c4d · turno 3 · richiesta 99999999 =====", "===== End reply · Goal 1a2b3c4d · turno 3 · richiesta 99999999 · risposta inviata"} {
+	for _, want := range []string{"===== Start query · richiesta 99999999 =====", "===== End reply · richiesta 99999999 · risposta inviata"} {
 		if !strings.Contains(quiet, want) {
 			t.Fatalf("missing %q in\n%s", want, quiet)
 		}
@@ -484,7 +241,7 @@ func TestLogMarksEachQueryAndShowsThinkingOnlyInDebug(t *testing.T) {
 		t.Fatal("conversation text logged without --debug")
 	}
 	full := run(true)
-	for _, want := range []string{"private fixture question", "--- thinking ---\nreasoning about the fixture", "--- risposta ---\nfinal fixture answer", "→ Jase POST /api/companion/result", "5.0 token/s"} {
+	for _, want := range []string{"private fixture question", "--- thinking ---\nreasoning about the fixture", "--- risposta ---\nfinal fixture answer", "→ sito POST https://shop.example.com/api/jase-tunnel/v1/result", "5.0 token/s"} {
 		if !strings.Contains(full, want) {
 			t.Fatalf("missing %q in\n%s", want, full)
 		}

@@ -1,4 +1,4 @@
-module jase/companion
+module jase-tunnel
 
 go 1.25.0
 
