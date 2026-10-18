@@ -87,7 +87,11 @@ func TestDesktopImportSerializesSelectorsAndRechecksDetectedFiles(t *testing.T) 
 // model and the expiry; «Scollega sito» closes only that site's tunnel.
 func TestEachSiteHasItsConsoleAndItsOwnDisconnect(t *testing.T) {
 	a := newTestApp(t)
-	mockWeb(t, a, func(*http.Request) (*http.Response, error) { return response(`{"ok":true}`), nil })
+	revoked := make(chan *http.Request, 1)
+	mockWeb(t, a, func(r *http.Request) (*http.Response, error) {
+		revoked <- r
+		return response(`{"ok":true}`), nil
+	})
 	m := model{Key: "ollama:qwen", Name: "qwen", Engine: "ollama", ContextTokens: 16384, Tools: true}
 	shop := storedGrant(a, m)
 	other := link{Protocol: webProtocol, Origin: "https://tools.example.org", Broker: "/api/jase-tunnel/v1/", Model: m, ExpiresAt: shop.ExpiresAt, Token: strings.Repeat("d", 64), ConnectionID: strings.Repeat("e", 32)}
@@ -115,5 +119,14 @@ func TestEachSiteHasItsConsoleAndItsOwnDisconnect(t *testing.T) {
 	}
 	if a.panelSnapshot(0, allSites).Title != "1 tunnel aperto" {
 		t.Fatal("closed tunnel still listed as open")
+	}
+	// Wait for the background validation before later tests change devBuild.
+	select {
+	case r := <-revoked:
+		if r.Method != "POST" || r.URL.String() != shop.Origin+shop.Broker+"revoke" || r.Header.Get("Authorization") != "Bearer "+shop.Token {
+			t.Fatal("disconnect notified the wrong site's broker")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("site never learned about the disconnect")
 	}
 }
