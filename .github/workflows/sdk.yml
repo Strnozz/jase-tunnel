@@ -79,11 +79,24 @@ jobs:
           JS
           gh release create "$RELEASE_TAG" .deploy-check/jase-tunnel-*.tgz .deploy-check/SHA256SUMS --verify-tag --target "$RELEASE_COMMIT" --draft --title "Jase Tunnel SDK $RELEASE_TAG" --notes-file .deploy-check/sdk-notes.md
           gh release edit "$RELEASE_TAG" --draft=false --latest=false
-      # `npx jase-tunnel init` needs the package on the npm registry. Publishing uses the
-      # repository secret NPM_TOKEN (a granular token with package write access and Bypass 2FA).
-      - name: Publish to the npm registry
+      - name: Install npm with support for staging new packages
+        run: npm install --global npm@11.21.0 --ignore-scripts
+      # Direct-capable tokens publish immediately. Stage-only tokens prepare the same
+      # package for a maintainer's 2FA approval; no token permissions are broadened.
+      - name: Publish to npm or prepare staged approval
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NODE_AUTH_TOKEN" ]; then echo 'NPM_TOKEN is not configured: npm publication cannot proceed.' >&2; exit 1; fi
-          npm publish .deploy-check/jase-tunnel-*.tgz --access public --provenance
+          set +e
+          npm publish .deploy-check/jase-tunnel-*.tgz --access public --provenance 2>&1 | tee .deploy-check/npm-publish.log
+          publish_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$publish_status" -eq 0 ]; then exit 0; fi
+          if ! node --input-type=module -e "import fs from 'node:fs'; process.exit(fs.readFileSync('.deploy-check/npm-publish.log','utf8').includes('(E_STAGE_REQUIRED)') ? 0 : 1);"; then exit "$publish_status"; fi
+          npm stage publish .deploy-check/jase-tunnel-*.tgz --access public --tag latest --provenance
+          cat >> "$GITHUB_STEP_SUMMARY" <<'MD'
+          The npm token permits staging only. The verified SDK package is prepared for approval and is not public yet.
+
+          Approve the staged version with 2FA in the npm website or with `npm stage approve <stage-id>`.
+          MD

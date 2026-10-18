@@ -87,7 +87,9 @@ Prima verifica il codice sui tre sistemi, poi compila i cinque pacchetti sul run
 
 Il workflow `sdk.yml` pubblica il modulo per i siti sui tag `sdk-vX.Y.Z`: allega il pacchetto alla release GitHub e, se il segreto `NPM_TOKEN` è configurato nel repository, lo pubblica sul registro npm. Senza la pubblicazione su npm il comando `npx jase-tunnel init` non è disponibile; in alternativa si usa `npx --yes <url del pacchetto .tgz> init`.
 
-`NPM_TOKEN` deve essere un token granulare con permesso di scrittura sui pacchetti e **Bypass two-factor authentication** abilitato. Se npm rifiuta la pubblicazione dopo la creazione della release GitHub, correggi il segreto e avvia manualmente **Check and package Jase Tunnel SDK** da Actions, indicando il tag esistente in `release_tag`. Il workflow ricompila e confronta il pacchetto e le impronte con gli allegati già pubblicati prima di riprovare npm; non sostituisce i file della release.
+Per la pubblicazione diretta, `NPM_TOKEN` deve essere un token granulare con permesso di scrittura sui pacchetti e **Bypass two-factor authentication** abilitato. Se npm risponde `E_STAGE_REQUIRED`, il token consente solo lo staging: il workflow prepara lo stesso pacchetto con `npm stage publish`, poi il proprietario lo approva con 2FA sul sito npm o con `npm stage approve <stage-id>`. Fino all'approvazione la versione non è pubblica.
+
+Per riprendere una pubblicazione dopo la creazione della release GitHub, avvia manualmente **Check and package Jase Tunnel SDK** da Actions, indicando il tag esistente in `release_tag`. Il workflow ricompila e confronta il pacchetto e le impronte con gli allegati già pubblicati prima di riprovare npm; non sostituisce i file della release.
 
 ## Struttura
 
