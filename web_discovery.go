@@ -115,6 +115,13 @@ func webFail(w http.ResponseWriter, status int, code, message string) {
 }
 
 func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
+	a.serveWebRequest(w, r, true)
+}
+
+// The connection window uses the same restricted discovery/pairing operations.
+// Its same-origin relay has already checked the local browser Origin; the website
+// Origin comes from the window's source-checked postMessage handshake.
+func (a *application) serveWebRequest(w http.ResponseWriter, r *http.Request, cors bool) {
 	origin := r.Header.Get("Origin")
 	if len(r.Header.Values("Origin")) != 1 || !webOrigin(origin) {
 		webFail(w, 403, "origin_mismatch", "Invalid website origin.")
@@ -125,10 +132,12 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 		webFail(w, 404, "not_found", "Resource not found.")
 		return
 	}
-	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Set("Vary", "Origin")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	if cors {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	}
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(204)
 		return
@@ -222,7 +231,7 @@ func (a *application) serveWeb(w http.ResponseWriter, r *http.Request) {
 	d := m.requests[webHash(token)]
 	if d == nil || len(token) != 64 || d.ExpiresAt <= time.Now().UnixMilli() {
 		m.mu.Unlock()
-		webFail(w, 410, "discovery_expired", "Rilevamento scaduto. Riprova dalla pagina.")
+		webFail(w, 410, "discovery_expired", "Discovery expired. Try again from the website.")
 		return
 	}
 	if d.Origin != origin {

@@ -3,7 +3,7 @@ import { adaptTool } from './tools.mjs';
 const MAX_BYTES = 1024 * 1024;
 const MAX_TOOLS = 100;
 const MAX_RESULT = 30_000;
-const version = '0.5.1';
+const version = '0.5.2';
 
 function abortable(promise, signal) {
   signal.throwIfAborted();

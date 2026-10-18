@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect · Jase Tunnel</title>
+<style nonce="{{nonce}}">
+  :root { color-scheme: light dark; font: 16px/1.55 system-ui, sans-serif; }
+  body { margin: 0; padding: 36px 28px; }
+  main { max-width: 440px; margin: auto; }
+  h1 { font-size: 24px; margin: 0 0 20px; }
+  #site { font-weight: 600; overflow-wrap: anywhere; }
+  #status { margin: 20px 0; }
+  small { opacity: .7; }
+</style>
+<main>
+  <h1>Jase Tunnel</h1>
+  <p id="site"></p>
+  <p id="status" role="status">Connecting to the website…</p>
+  <small>Keep this window open until you have confirmed the website and chosen a model in the Jase Tunnel app.</small>
+</main>
+<script nonce="{{nonce}}">
+(() => {
+  'use strict';
+  const protocol = 'jase-tunnel-window-v1';
+  const params = new URLSearchParams(location.hash.slice(1));
+  const channel = params.get('channel'), origin = params.get('origin');
+  const status = document.getElementById('status'), site = document.getElementById('site');
+  const opener = window.opener;
+  function eligible(value) {
+    try {
+      const url = new URL(value);
+      return url.origin === value && (url.protocol === 'https:' ||
+        url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname));
+    } catch { return false; }
+  }
+  if (window.top !== window || !opener || !/^[a-f0-9]{64}$/.test(channel ?? '') || !eligible(origin)) {
+    status.textContent = 'Return to the website and click Connect my model.';
+    return;
+  }
+  site.textContent = origin;
+  let busy = false, bound = false;
+  const send = data => opener.postMessage({ protocol, channel, ...data }, origin);
+  window.addEventListener('message', async event => {
+    const message = event.data;
+    if (event.source !== opener || event.origin !== origin || message?.protocol !== protocol || message.channel !== channel) return;
+    if (message.type === 'hello') { bound = true; send({ type: 'ready' }); return; }
+    if (!bound || busy || message.type !== 'request' || !Number.isSafeInteger(message.id) || message.id < 1 ||
+        !['discover', 'discovery', 'pair'].includes(message.operation)) return;
+    if (JSON.stringify(message).length > 8192) return;
+    busy = true;
+    try {
+      const response = await fetch('/v1/browser-bridge', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        credentials: 'omit', cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(25_000),
+        body: JSON.stringify({ origin, operation: message.operation, receipt: message.receipt, body: message.body })
+      });
+      const data = await response.json();
+      if (data.state === 'awaiting_approval') status.textContent = 'Confirm this website and choose a model in the Jase Tunnel app.';
+      else if (data.state === 'connected') status.textContent = 'Connected. Return to the website.';
+      else if (data.state === 'compatible') status.textContent = 'Website verified. Waiting for confirmation in the app…';
+      else if (!response.ok) status.textContent = data.error?.message ?? 'Connection unavailable. Return to the website and try again.';
+      send({ type: 'response', id: message.id, status: response.status, data });
+    } catch {
+      status.textContent = 'Cannot reach Jase Tunnel. Open the app, then reconnect from the website.';
+      send({ type: 'response', id: message.id, status: 503, data: { error: { message: status.textContent } } });
+    } finally { busy = false; }
+  });
+  send({ type: 'loaded' });
+  setTimeout(() => { if (!bound) status.textContent = 'This website could not open the connection. Try Chrome or Edge, or ask the website owner to check its window policy.'; }, 10_000);
+})();
+</script>
+</html>

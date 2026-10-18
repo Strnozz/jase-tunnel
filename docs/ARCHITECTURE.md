@@ -6,11 +6,13 @@ Jase Tunnel is a standalone app that connects a person’s local LLM to websites
 
 1. **Website:** `npx jase-tunnel init` publishes `/.well-known/jase-tunnel.json`, mounts the broker at `/api/jase-tunnel/v1/` and adds the panel.
 2. **Page:** contacts `http://127.0.0.1:11439/tunnel/v1/discover` automatically only when the browser will not prompt. Otherwise contact starts through the panel button.
-3. **App:** verifies the manifest on the domain from the `Origin` header, using public IPs only and no redirects. A compatible site can trigger “example.com supports Jase Tunnel.”
+3. **App:** verifies the manifest on the domain from the `Origin` header (or the source-checked connection window), using public IPs only and no redirects. A compatible site can trigger “example.com supports Jase Tunnel.”
 4. **Consent:** **Connect** in the notification or page resumes pairing. The page requests a ticket from its own server and delivers it to the app. The app shows the verified domain, data exchange and model selector. Only after confirmation does it exchange the ticket for a grant lasting at most thirty minutes, bound to the chosen model.
 5. **Transport:** the app long-polls the website’s broker, runs inference through Ollama or LM Studio, and returns text and tool requests. The website’s server authorizes and executes tools. The app does not execute commands received from the model.
 
 The protocol is `jase-tunnel-v1`; see [WEB-STANDARD.md](WEB-STANDARD.md). No third-party relay or inbound router port is required.
+
+Safari uses an explicit top-level local window (desktop 0.3.4+, SDK 0.5.2+) because it blocks the direct HTTPS-to-HTTP loopback fetch. The website opens `/tunnel/connect` during the Connect click. The window accepts `postMessage` only from its exact opener and the expected website origin, with a fresh random channel. Its same-origin `/v1/browser-bridge` relay accepts only discovery, receipt status and pairing; it reuses domain verification, origin-bound receipts, quotas and native consent. It cannot expose app management or model inventory. No ticket or receipt appears in the URL. Safari does not make automatic announcements or open windows on page load.
 
 ## Optional MCP integration
 
@@ -38,6 +40,8 @@ The stored panel identity is `appkit-v1`, `win32-v1` or `gtk3-v1`. Relaunching t
 
 | Endpoint | Caller | Purpose |
 | --- | --- | --- |
+| `GET /tunnel/connect` | User-opened top-level local window | Safari connection page; nonce CSP and no embedding |
+| `POST /v1/browser-bridge` | Local window, same-origin JSON only | Relay only discovery, receipt status and pairing |
 | `POST /tunnel/v1/discover` | Eligible public HTTPS website | Announces the page; returns a five-minute receipt |
 | `GET /tunnel/v1/discovery` | Page with its own receipt | Reads its discovery state |
 | `POST /tunnel/v1/pair` | Page with its own receipt | Delivers a ticket and opens consent |

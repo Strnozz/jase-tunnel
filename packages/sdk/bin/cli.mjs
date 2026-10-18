@@ -248,7 +248,7 @@ function init() {
   if(!flag('--dry-run') && !flag('--skip-install')) {
     const spec=option('--package')??`${packageJSON.name}@${packageJSON.version}`;
     const npmCLI=[process.env.npm_execpath?.replace(/npx-cli\.js$/,'npm-cli.js'),join(dirname(process.execPath),'node_modules/npm/bin/npm-cli.js')].find(p=>p&&existsSync(p));
-    if(process.platform==='win32'&&!npmCLI) throw new Error('Percorso npm unavailable. Avvia init tramite npx.');
+    if(process.platform==='win32'&&!npmCLI) throw new Error('npm path unavailable. Run init through npx.');
     const installArgs=['install','--ignore-scripts','--no-audit','--no-fund','--save-exact',spec];
     const result=spawnSync(npmCLI?process.execPath:'npm',npmCLI?[npmCLI,...installArgs]:installArgs,{cwd:root,stdio:'inherit',shell:false});
     if(result.error||result.status!==0) throw new Error('Dependency installation failed. No project files were changed. Retry init --package <package>.');

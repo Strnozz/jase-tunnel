@@ -42,6 +42,8 @@ On Linux, install GTK 3 (`libgtk-3-0` or `libgtk-3-0t64` on Ubuntu/Debian) and `
 
 Ollama or LM Studio must be installed and running. Engines and model weights are not included.
 
+**Safari:** use app **0.3.4 or later** and website SDK **0.5.2 or later**. Clicking **Connect my model** opens a small local connection window; keep it open while choosing the model and confirming the domain in the app. It closes after pairing. Safari blocks the direct HTTPS-to-HTTP loopback request used by earlier versions. This explicit window requires no certificate installation or change to browser security settings. Safari does not announce pages automatically: reconnect through the website button. Chrome and Edge keep the direct connection and may ask for local network permission.
+
 ## Unsigned executables
 
 **Jase Tunnel packages are unsigned.** The macOS bundle has an ad-hoc signature, without Apple Developer ID signing or notarization. Windows executables have no Authenticode signature. Your operating system cannot verify the publisher or integrity through a publisher signature and may identify the software as coming from an unknown developer.
@@ -97,8 +99,8 @@ This writes to `dist/`; `--out <directory>` selects another location. The macOS 
 
 Executable downloads are hosted in [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases). Website panels select their platform’s download from public releases. `release.yml` runs when a tag matches `VERSION`:
 
-- `v0.3.3`: the stable-channel build for public HTTPS websites.
-- `dev-v0.3.3-preview1`: a development prerelease that also accepts `localhost`.
+- `v0.3.4`: the stable-channel build for public HTTPS websites.
+- `dev-v0.3.4-preview1`: a development prerelease that also accepts `localhost`.
 
 CI checks all three operating systems, builds the five packages on macOS, verifies the commit, run, channel, inventory and SHA-256 checksums, then uploads them to a **draft release for owner approval**. Publishing the draft makes the downloads available to website panels. Existing public releases are never overwritten.
 
