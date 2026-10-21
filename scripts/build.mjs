@@ -5,8 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
-import { companionIcons, desktopIcon } from "./companion-icons.mjs";
-import { windowsResources } from "./windows-resources.mjs";
+import { companionIcons } from "./companion-icons.mjs";
 
 const args = process.argv.slice(2), option = name => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
 // Development packages are separate: a localhost download must never install
@@ -29,8 +28,8 @@ const ownRepository = existsSync(join(root, ".git"));
 const git = arguments_ => spawnSync("git", arguments_, { cwd: root, encoding: "utf8" });
 const head = ownRepository ? git(["rev-parse", "HEAD"]) : undefined;
 const revision = head?.status === 0 ? head.stdout.trim() : "local";
-await desktopIcon(join(root,"assets/jase-logo.png"),join(root,"assets/desktop-icon.png"));
-await windowsResources(root);
+// Build from the reviewed, checked-in icon resources. Re-encoding them here can
+// change bytes across libvips CPU architectures and falsely dirty the checkout.
 const status = ownRepository ? git(["status", "--porcelain"]) : undefined;
 const dirty = revision === "local" || status?.status !== 0 || !!status?.stdout.trim();
 const sources = [...readdirSync(root).filter(name => /\.(?:go|m|syso)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/jase-logo.png", "assets/windows.manifest", "assets/desktop-icon.png", "scripts/windows-resources.mjs", "scripts/companion-icons.mjs", "scripts/build.mjs", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json"].map(name => join(root, name))];

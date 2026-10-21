@@ -106,14 +106,14 @@ npm ci
 npm run build:windows
 ```
 
-This writes both `.exe` files to `dist/`; append `-- --dev` for localhost-enabled packages in `dist-dev/`. `JASE_GO` can select a local compiler. The source artwork is `assets/jase-logo.png`. After changing it or `assets/windows.manifest`, run `npm run icons` and commit the regenerated PNG, ICO and both `rsrc_windows_*.syso` files. The checked-in resource objects also provide the Explorer icon and manifest for a plain `go build`, without Node or a resource compiler. Full release builds regenerate these resources automatically.
+This writes both `.exe` files to `dist/`; append `-- --dev` for localhost-enabled packages in `dist-dev/`. `JASE_GO` can select a local compiler. The source artwork is `assets/jase-logo.png`. After changing it or `assets/windows.manifest`, run `npm run icons` and commit the regenerated PNG, ICO and both `rsrc_windows_*.syso` files. The checked-in resource objects also provide the Explorer icon and manifest for a plain `go build`, without Node or a resource compiler. Builds use those reviewed resources without rewriting them; tests validate the encoded resources exactly and the artwork with a small tolerance for CPU-specific resampling.
 
 ## GitHub and npm releases
 
 Executable downloads are hosted in [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases). Website panels select their platform’s download from public releases. `release.yml` runs when a tag matches `VERSION`:
 
-- `v0.3.5`: the stable-channel build for public HTTPS websites.
-- `dev-v0.3.5-preview1`: a development prerelease that also accepts `localhost`.
+- `v0.3.6`: the stable-channel build for public HTTPS websites.
+- `dev-v0.3.6-preview1`: a development prerelease that also accepts `localhost`.
 
 CI checks all three operating systems, builds the five packages on macOS, verifies the commit, run, channel, inventory and SHA-256 checksums, then uploads them to a **draft release for owner approval**. Publishing the draft makes the downloads available to website panels. Existing public releases are never overwritten.
 
