@@ -13,8 +13,9 @@ extern void jaseDesktopConsent(char *,char *);
 extern void jaseDesktopNotificationClicked(char *);
 extern void jaseDesktopRevokeSite(char *);
 
-// Artwork comes from assets/icon.svg, rasterized by the package builder.
-// The app keeps its colors; the menu bar uses the icon's white silhouette.
+// Artwork comes from assets/jase-logo.png, rasterized by the package builder.
+// JaseMenu is the white J and jay silhouette, including the source alpha.
+// Keep it non-template so AppKit preserves the requested white menu-bar image.
 static NSImage *JaseIcon(CGFloat size, BOOL menu) {
     NSString *name=menu?@"JaseMenu":@"Jase";
     NSImage *source=[NSImage imageNamed:name];

@@ -10,6 +10,6 @@ const result = spawnSync(process.env.JASE_GO ?? "go", ["test", "-race", "./..."]
 });
 if (result.error) console.error(result.error.message);
 if (result.status !== 0) process.exit(result.status ?? 1);
-const release = spawnSync(process.execPath, ["--test", "scripts/verify-release.test.mjs"], { cwd: root, stdio: "inherit" });
+const release = spawnSync(process.execPath, ["--test", "scripts/verify-release.test.mjs", "scripts/windows-resources.test.mjs", "scripts/companion-icons.test.mjs"], { cwd: root, stdio: "inherit" });
 if (release.error) console.error(release.error.message);
 process.exit(release.status ?? 1);

@@ -36,7 +36,11 @@ On all three systems the panel remains available while the app works in the back
 
 On macOS, move **Jase Tunnel** to Applications or `~/Applications` before opening it: Notification Center accepts registered apps in those locations. The first compatible website triggers the notification permission request.
 
+All desktop packages use the Jase J and jay logo. On macOS, the app and Dock icon keep the orange artwork; the top menu bar shows the same silhouette in white on a transparent background, including on Retina displays.
+
 On Windows, the tray icon may appear under hidden icons. Double-click opens the panel; right-click opens its menu. Closing the window keeps the tunnel running in the tray.
+
+The Windows panel uses a light Jase interface, rounded sections, accessible native controls and per-monitor DPI scaling. Its executable, window and tray use the Jase logo. The embedded application manifest enables current Windows visual styles without requiring an additional UI runtime.
 
 On Linux, install GTK 3 (`libgtk-3-0` or `libgtk-3-0t64` on Ubuntu/Debian) and `notify-send` (`libnotify-bin`) for notifications. The app uses Ayatana AppIndicator when available, or the traditional GTK tray icon. Without a tray, closing the window minimizes it to the taskbar.
 
@@ -95,12 +99,21 @@ npm run build
 
 This writes to `dist/`; `--out <directory>` selects another location. The macOS bundle has an ad-hoc signature. Developer ID signing, Apple notarization and Windows signing are not configured; see [Unsigned executables](#unsigned-executables).
 
+To build only the Windows x64 and ARM64 executables from Windows, Linux or macOS:
+
+```sh
+npm ci
+npm run build:windows
+```
+
+This writes both `.exe` files to `dist/`; append `-- --dev` for localhost-enabled packages in `dist-dev/`. `JASE_GO` can select a local compiler. The source artwork is `assets/jase-logo.png`. After changing it or `assets/windows.manifest`, run `npm run icons` and commit the regenerated PNG, ICO and both `rsrc_windows_*.syso` files. The checked-in resource objects also provide the Explorer icon and manifest for a plain `go build`, without Node or a resource compiler. Full release builds regenerate these resources automatically.
+
 ## GitHub and npm releases
 
 Executable downloads are hosted in [Strnozz/jase-tunnel](https://github.com/Strnozz/jase-tunnel/releases). Website panels select their platform’s download from public releases. `release.yml` runs when a tag matches `VERSION`:
 
-- `v0.3.4`: the stable-channel build for public HTTPS websites.
-- `dev-v0.3.4-preview1`: a development prerelease that also accepts `localhost`.
+- `v0.3.5`: the stable-channel build for public HTTPS websites.
+- `dev-v0.3.5-preview1`: a development prerelease that also accepts `localhost`.
 
 CI checks all three operating systems, builds the five packages on macOS, verifies the commit, run, channel, inventory and SHA-256 checksums, then uploads them to a **draft release for owner approval**. Publishing the draft makes the downloads available to website panels. Existing public releases are never overwritten.
 
@@ -116,7 +129,9 @@ Before a version is public on npm, providers can use its `.tgz` package through 
 | --- | --- |
 | `*.go`, `desktop_darwin.m` | Engine, protocol, native interfaces and tests |
 | `packages/sdk` | npm package: installer, broker, web panel and adapters |
-| `assets/icon.svg` | Icon source |
+| `assets/jase-logo.png` | Desktop logo source |
+| `assets/jase.ico`, `assets/windows.manifest`, `rsrc_windows_*.syso` | Windows executable icons, visual styles and DPI manifest |
+| `assets/icon.svg` | Original animated website artwork |
 | `assets/desktop-icon.png` | Icon embedded in Windows/Linux executables |
 | `scripts/` | Builds, icon generation, release verification and tests |
 | `.github/workflows/` | Windows, macOS and Linux checks and releases |

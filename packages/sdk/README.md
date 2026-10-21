@@ -153,6 +153,8 @@ In the repository, run `node packages/sdk/examples/mcp-shop.mjs` after `npm ci -
 
 Visitors need **Jase Tunnel 0.3.0 or later**. The panel offers downloads from GitHub releases. Where the browser permits it without prompting, the page announces itself; the app verifies the domain and manifest and displays a notification. **Connect** in the notification resumes pairing in the page. The visitor chooses a model and confirms in the app. Before consent the website receives no model inventory.
 
+Desktop **0.3.5** updates the Jase logo on Windows, macOS and Linux and refreshes the Windows panel. The macOS menu bar uses a white J and jay silhouette. SDK **0.5.3** accompanies this desktop release; the SDK protocol and transport behavior are unchanged. Downloads become available in website panels after the desktop GitHub release is published. npm distributes the website SDK; it does not install or replace the desktop executable.
+
 Chrome and Edge may require local network access permission before a page contacts the app. The panel does not announce itself automatically when this would trigger a prompt. Use **Connect my model** on the first visit; subsequent visits to the same website can notify automatically.
 
 **Safari requires desktop 0.3.4+ and SDK 0.5.2+.** Safari blocks direct HTTP loopback requests from HTTPS websites. The SDK instead opens a local connection window synchronously from the Connect click. It exchanges only discovery and pairing messages with its exact opener, using pinned origins and a fresh random channel. Keep this window open while confirming the domain and model in the app. It closes when pairing finishes. No certificate installation, extension or browser security exception is required.

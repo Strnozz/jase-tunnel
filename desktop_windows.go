@@ -13,7 +13,9 @@ import (
 )
 
 const desktopAvailable = true
-const desktopUIName = "win32-v1"
+const desktopUIName = "win32-v2"
+
+//go:generate node scripts/windows-resources.mjs
 
 //go:embed assets/desktop-icon.png
 var windowsIconPNG []byte
@@ -108,6 +110,8 @@ type windowsPanel struct {
 	announcement                                                string
 	sites                                                       []panelSite
 	site                                                        string // Key of the console shown
+	style                                                       windowsStyle
+	section, hint                                               uintptr
 }
 
 func init()                   { runtime.LockOSThread() }
@@ -122,6 +126,15 @@ func winCall(name string, args ...uintptr) uintptr {
 }
 func winText(hwnd uintptr, text string) {
 	p := wtext(text)
+	// Avoid repainting unchanged labels on every service poll.
+	length := winCall("GetWindowTextLengthW", hwnd)
+	if length == uintptr(len(syscall.StringToUTF16(text))-1) {
+		current := make([]uint16, length+1)
+		winCall("GetWindowTextW", hwnd, uintptr(unsafe.Pointer(&current[0])), length+1)
+		if syscall.UTF16ToString(current) == text {
+			return
+		}
+	}
 	winCall("SetWindowTextW", hwnd, uintptr(unsafe.Pointer(p)))
 	runtime.KeepAlive(p)
 }
@@ -133,6 +146,9 @@ func (p *windowsPanel) child(class, text string, style uint32, id int) uintptr {
 	if h == 0 {
 		panic("Could not create the native control " + class)
 	}
+	theme := wtext("Explorer")
+	uxtheme.NewProc("SetWindowTheme").Call(h, uintptr(unsafe.Pointer(theme)), 0)
+	runtime.KeepAlive(theme)
 	winCall("SendMessageW", h, 0x30, p.font, 1)
 	if id != 0 {
 		p.controls[id] = h
@@ -332,6 +348,36 @@ func winProcedure(hwnd uintptr, message uint32, wparam, lparam uintptr) uintptr 
 		case wmCommand:
 			p.command(int(wparam&0xffff), int(wparam>>16))
 			return 0
+		case 0xf: // WM_PAINT
+			p.paint()
+			return 0
+		case 0x14: // WM_ERASEBKGND: paint the full surface once in WM_PAINT.
+			return 1
+		case 0x2b: // WM_DRAWITEM
+			return p.drawItem(lparam)
+		case 0x2c: // WM_MEASUREITEM (owner-drawn list rows)
+			var item winMeasureItem
+			winReadNative(lparam, unsafe.Pointer(&item), unsafe.Sizeof(item))
+			item.Height = uint32(p.pixels(p.rowHeight(int(item.ID))))
+			kernel32.NewProc("RtlMoveMemory").Call(lparam, uintptr(unsafe.Pointer(&item)), unsafe.Sizeof(item))
+			return 1
+		case 0x138, 0x133, 0x134: // WM_CTLCOLORSTATIC / EDIT / LISTBOX
+			return p.controlColor(wparam, lparam)
+		case 0x1a, 0x15, 0x31a: // settings, system colors or theme changed
+			for _, brush := range []uintptr{p.style.backgroundBrush, p.style.surfaceBrush, p.style.tintBrush} {
+				gdi32.NewProc("DeleteObject").Call(brush)
+			}
+			p.initStyle()
+			winCall("RedrawWindow", hwnd, 0, 0, 0x185)
+			return 0
+		case 0x2e0: // WM_DPICHANGED
+			p.scale = int(wparam & 0xffff)
+			p.resetFonts()
+			var rect winRect
+			winReadNative(lparam, unsafe.Pointer(&rect), unsafe.Sizeof(rect))
+			winCall("SetWindowPos", hwnd, 0, uintptr(rect.Left), uintptr(rect.Top), uintptr(rect.Right-rect.Left), uintptr(rect.Bottom-rect.Top), 0x14)
+			p.layout()
+			return 0
 		case wmTray:
 			action := windowsTrayAction(lparam)
 			if action == -1 {
@@ -367,7 +413,7 @@ func winProcedure(hwnd uintptr, message uint32, wparam, lparam uintptr) uintptr 
 			return 0
 		case 0x24: // WM_GETMINMAXINFO: keep all controls and Quit reachable.
 			if lparam != 0 {
-				minimum := winPoint{X: int32(760 * p.scale / 96), Y: int32(660 * p.scale / 96)}
+				minimum := winPoint{X: int32(p.pixels(920)), Y: int32(p.pixels(720))}
 				// MINMAXINFO.ptMinTrackSize is its fourth POINT. Write through
 				// the native API without converting an integer callback argument
 				// into a Go pointer retained on the callback stack.
@@ -403,42 +449,55 @@ func (p *windowsPanel) layout() {
 	var r winRect
 	winCall("GetClientRect", p.hwnd, uintptr(unsafe.Pointer(&r)))
 	w, h := int(r.Right)*96/p.scale, int(r.Bottom)*96/p.scale
-	if w < 650 {
-		w = 650
+	if w < 880 {
+		w = 880
 	}
-	if h < 520 {
-		h = 520
+	if h < 640 {
+		h = 640
 	}
-	p.position(p.status, 24, 18, w-48, 30)
-	p.position(p.connection, 24, 52, w-48, 24)
-	p.position(p.controls[idAdd], 24, 84, 140, 30)
-	p.position(p.controls[idQuit], w-190, 84, 166, 30)
-	p.position(p.controls[idModels], 24, 130, 130, 30)
-	p.position(p.controls[idActivity], 166, 130, 130, 30)
-	p.position(p.controls[idRevoke], w-190, 130, 166, 30)
-	p.position(p.controls[idModelList], 24, 174, w-48, h-365)
-	p.position(p.controls[idImport], 24, h-181, 190, 30)
-	p.position(p.notice, 24, h-143, w-48, 40)
-	p.position(p.stats, 24, 170, w-48, 24)
-	p.position(p.controls[idSiteList], 24, 200, 230, h-308)
-	p.position(p.controls[idFilter], 266, 200, 230, 200)
-	p.position(p.controls[idRevokeOne], w-370, 200, 166, 28)
-	p.position(p.controls[idClear], w-194, 200, 170, 28)
-	p.position(p.controls[idEventList], 266, 240, w-290, h-475)
-	p.position(p.detail, 266, h-225, w-290, 117)
-	p.position(p.controls[idDebug], 24, h-96, w-48, 23)
-	p.position(p.controls[idThinking], 24, h-69, w-48, 23)
-	p.position(p.privacy, 24, h-42, w-48, 36)
+	p.position(p.status, 60, 126, w-300, 28)
+	p.position(p.connection, 44, 164, w-88, 40)
+	p.position(p.controls[idAdd], w-336, 28, 150, 40)
+	p.position(p.controls[idQuit], w-174, 28, 150, 40)
+	p.position(p.controls[idModels], 24, 228, 128, 40)
+	p.position(p.controls[idActivity], 160, 228, 128, 40)
+	p.position(p.controls[idRevoke], w-212, 120, 168, 36)
+	sectionWidth := w - 300
+	if p.activity {
+		sectionWidth = 220
+	}
+	p.position(p.section, 44, 296, sectionWidth, 26)
+	p.position(p.hint, 44, 326, w-88, 24)
+	p.position(p.controls[idModelList], 36, 364, w-72, h-604)
+	p.position(p.controls[idImport], 44, h-224, 156, 36)
+	p.position(p.notice, 216, h-222, w-260, 44)
+	p.position(p.stats, 308, 296, w-352, 24)
+	p.position(p.controls[idSiteList], 36, 328, 244, h-530)
+	p.position(p.controls[idFilter], 308, 332, 200, 220)
+	p.position(p.controls[idRevokeOne], w-348, 330, 176, 34)
+	p.position(p.controls[idClear], w-160, 330, 116, 34)
+	detailHeight := max(60, min(100, (h-572)/3))
+	p.position(p.controls[idEventList], 300, 380, w-336, h-584-detailHeight)
+	p.position(p.detail, 308, h-192-detailHeight, w-352, detailHeight)
+	p.position(p.controls[idDebug], 44, h-148, 340, 26)
+	p.position(p.controls[idThinking], 44, h-110, 340, 26)
+	p.position(p.privacy, 24, h-44, w-48, 34)
 	for _, id := range []int{idModelList, idImport} {
-		winCall("ShowWindow", p.controls[id], boolShow(!p.activity))
+		winCall("ShowWindow", p.controls[id], boolShow(!p.activity && (id != idModelList || len(p.models) > 0)))
 	}
 	winCall("ShowWindow", p.notice, boolShow(!p.activity))
+	winCall("ShowWindow", p.hint, boolShow(!p.activity))
+	winText(p.section, map[bool]string{false: "Your local models", true: "Websites"}[p.activity])
 	for _, id := range []int{idFilter, idClear, idEventList, idSiteList, idRevokeOne} {
 		winCall("ShowWindow", p.controls[id], boolShow(p.activity))
 	}
 	for _, h := range []uintptr{p.stats, p.detail} {
 		winCall("ShowWindow", h, boolShow(p.activity))
 	}
+	for _, id := range []int{idModels, idActivity} {
+		winCall("InvalidateRect", p.controls[id], 0, 1)
+	}
+	winCall("InvalidateRect", p.hwnd, 0, 0)
 }
 func boolShow(visible bool) uintptr {
 	if visible {
@@ -547,6 +606,13 @@ func (p *windowsPanel) refresh() {
 		}
 		p.models = s.Models
 		winListFill(p.controls[idModelList], rows, selected)
+		label := "models"
+		if len(p.models) == 1 {
+			label = "model"
+		}
+		winText(p.hint, fmt.Sprintf("%d %s detected on this computer", len(p.models), label))
+		winCall("ShowWindow", p.controls[idModelList], boolShow(!p.activity && len(p.models) > 0))
+		winCall("InvalidateRect", p.hwnd, 0, 0)
 	}
 	if p.generation != s.Generation || !reflect.DeepEqual(p.events, s.Events) {
 		selected := panelEventSelection(p.events, s.Events, winListSelection(p.controls[idEventList]), p.generation == s.Generation)
@@ -570,7 +636,10 @@ func (a *application) runDesktopUI() {
 	p := &windowsPanel{a: a, controls: map[int]uintptr{}, scale: 96, site: allSites}
 	winPanel = p
 	defer func() { winHandle.Store(0); winPanel = nil }()
-	user32.NewProc("SetProcessDPIAware").Call()
+	// The embedded manifest selects per-monitor v2. This also covers go run.
+	if dpi := user32.NewProc("SetProcessDpiAwarenessContext"); dpi.Find() == nil {
+		dpi.Call(^uintptr(3)) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 (-4)
+	}
 	if dpi := user32.NewProc("GetDpiForSystem"); dpi.Find() == nil {
 		value, _, _ := dpi.Call()
 		if value > 0 {
@@ -578,14 +647,16 @@ func (a *application) runDesktopUI() {
 		}
 	}
 	p.instance, _, _ = kernel32.NewProc("GetModuleHandleW").Call(0)
-	p.icon = winCall("CreateIconFromResourceEx", uintptr(unsafe.Pointer(&windowsIconPNG[0])), uintptr(len(windowsIconPNG)), 1, 0x30000, 32, 32, 0)
+	p.icon = p.logoIcon(32)
 	if p.icon == 0 {
 		desktopStartupError("Could not load the Jase Tunnel icon.")
 		return
 	}
 	defer winCall("DestroyIcon", p.icon)
+	p.initStyle()
+	defer p.disposeStyle()
 	name := wtext("JaseTunnelNativePanel")
-	class := winClass{Style: 8, Procedure: syscall.NewCallback(winProcedure), Instance: p.instance, Icon: p.icon, SmallIcon: p.icon, Name: name, Background: 16}
+	class := winClass{Style: 8, Procedure: syscall.NewCallback(winProcedure), Instance: p.instance, Icon: p.icon, SmallIcon: p.icon, Name: name}
 	class.Size = uint32(unsafe.Sizeof(class))
 	class.Cursor = winCall("LoadCursorW", 0, 32512)
 	if winCall("RegisterClassExW", uintptr(unsafe.Pointer(&class))) == 0 {
@@ -594,38 +665,38 @@ func (a *application) runDesktopUI() {
 	}
 	defer winCall("UnregisterClassW", uintptr(unsafe.Pointer(name)), p.instance)
 	title := wtext("Jase Tunnel")
-	p.hwnd = winCall("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), 0x00cf0000, 0x80000000, 0x80000000, uintptr(960*p.scale/96), uintptr(760*p.scale/96), 0, 0, p.instance, 0)
+	p.hwnd = winCall("CreateWindowExW", 0, uintptr(unsafe.Pointer(name)), uintptr(unsafe.Pointer(title)), 0x00cf0000|0x02000000, 0x80000000, 0x80000000, uintptr(p.pixels(1080)), uintptr(p.pixels(860)), 0, 0, p.instance, 0)
 	runtime.KeepAlive(title)
 	if p.hwnd == 0 {
 		desktopStartupError("Could not open Jase Tunnel.")
 		return
 	}
 	winHandle.Store(p.hwnd)
-	face := wtext("Segoe UI")
-	p.font, _, _ = gdi32.NewProc("CreateFontW").Call(uintptr(int64(-14*p.scale/96)), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 0, 0, uintptr(unsafe.Pointer(face)))
-	p.titleFont, _, _ = gdi32.NewProc("CreateFontW").Call(uintptr(int64(-22*p.scale/96)), 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 0, 0, uintptr(unsafe.Pointer(face)))
-	runtime.KeepAlive(face)
-	defer gdi32.NewProc("DeleteObject").Call(p.font)
-	defer gdi32.NewProc("DeleteObject").Call(p.titleFont)
+	corner := uint32(2) // DWMWCP_ROUND on Windows 11; ignored on Windows 10.
+	dwmapi.NewProc("DwmSetWindowAttribute").Call(p.hwnd, 33, uintptr(unsafe.Pointer(&corner)), 4)
+	p.resetFonts()
 	p.status = p.child("STATIC", "Jase Tunnel is running", 0, 0)
 	winCall("SendMessageW", p.status, 0x30, p.titleFont, 1)
 	p.connection = p.child("STATIC", "", 0, 0)
 	p.stats = p.child("STATIC", "", 0, 0)
 	p.privacy = p.child("STATIC", "", 0, 0)
 	p.notice = p.child("STATIC", "Open Ollama or the LM Studio local server. You can add GGUF files or compatible weights directories.", 0, 0)
+	p.section = p.child("STATIC", "Your local models", 0, 0)
+	p.hint = p.child("STATIC", "No models detected yet", 0, 0)
+	winCall("SendMessageW", p.section, 0x30, p.style.semibold, 1)
 	for _, button := range []struct {
 		id   int
 		text string
 	}{{idRevoke, "Disconnect websites"}, {idRevokeOne, "Disconnect website"}, {idAdd, "Add weights…"}, {idQuit, trayLabels[2]}, {idModels, "Models"}, {idActivity, "Activity"}, {idImport, "Add selected"}, {idClear, "Clear log"}} {
-		p.child("BUTTON", button.text, 0x10000, button.id)
+		p.child("BUTTON", button.text, 0x10000|0xb, button.id) // BS_OWNERDRAW
 	}
 	p.child("BUTTON", "Detailed log, including text", 0x10003, idDebug)
 	p.child("BUTTON", "Model reasoning, if supported", 0x10003, idThinking)
 	for _, id := range []int{idModelList, idEventList, idSiteList} {
-		p.child("LISTBOX", "", 0x10000|0x200000|0x100000|0x800000|1|0x100, id)
-		winCall("SendMessageW", p.controls[id], 0x194, 1600, 0)
+		p.child("LISTBOX", "", 0x10000|0x200000|1|0x100|0x10|0x40, id) // strings + fixed owner-drawn rows
+		winCall("SendMessageW", p.controls[id], 0x1a0, 0, uintptr(p.pixels(p.rowHeight(id))))
 	}
-	p.detail = p.child("EDIT", "Select an event to view its details.", 0x10000|0x800000|0x200000|4|0x40|0x800, 0)
+	p.detail = p.child("EDIT", "Select an event to view its details.", 0x10000|0x200000|4|0x40|0x800, 0)
 	p.child("COMBOBOX", "", 0x10000|0x200000|3, idFilter)
 	for _, f := range panelFilters {
 		t := wtext(f.Label)

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { companionIcons, desktopIcon } from "./companion-icons.mjs";
+import { windowsResources } from "./windows-resources.mjs";
 
 const args = process.argv.slice(2), option = name => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
 // Development packages are separate: a localhost download must never install
@@ -28,10 +29,11 @@ const ownRepository = existsSync(join(root, ".git"));
 const git = arguments_ => spawnSync("git", arguments_, { cwd: root, encoding: "utf8" });
 const head = ownRepository ? git(["rev-parse", "HEAD"]) : undefined;
 const revision = head?.status === 0 ? head.stdout.trim() : "local";
-await desktopIcon(join(root,"assets/icon.svg"),join(root,"assets/desktop-icon.png"));
+await desktopIcon(join(root,"assets/jase-logo.png"),join(root,"assets/desktop-icon.png"));
+await windowsResources(root);
 const status = ownRepository ? git(["status", "--porcelain"]) : undefined;
 const dirty = revision === "local" || status?.status !== 0 || !!status?.stdout.trim();
-const sources = [...readdirSync(root).filter(name => /\.(?:go|m)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/icon.svg", "assets/desktop-icon.png", "scripts/companion-icons.mjs", "scripts/build.mjs", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json"].map(name => join(root, name))];
+const sources = [...readdirSync(root).filter(name => /\.(?:go|m|syso)$/.test(name) || name === "VERSION" || name === "go.mod" || name === "go.sum").map(name => join(root, name)), ...["assets/jase-logo.png", "assets/windows.manifest", "assets/desktop-icon.png", "scripts/windows-resources.mjs", "scripts/companion-icons.mjs", "scripts/build.mjs", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json"].map(name => join(root, name))];
 sources.push(join(root, "web_bridge.html"));
 const sourceHash = createHash("sha256");
 for (const path of sources.sort()) sourceHash.update(readFileSync(path));
@@ -87,7 +89,7 @@ Models run through Ollama or LM Studio on your computer. No account or cloud ser
   const app = join(temporary, "Jase Tunnel.app"), contents = join(app, "Contents"), binary = join(contents, "MacOS", "Jase Tunnel"); mkdirSync(join(contents, "MacOS"), { recursive: true });
   const intel = join(temporary, "mac-intel"), arm = join(temporary, "mac-arm"); compile("darwin", "amd64", intel); compile("darwin", "arm64", arm); universal(intel, arm, binary);
   const resources = join(contents,"Resources"), iconSet = join(temporary,"Jase.iconset"); mkdirSync(resources,{recursive:true});
-  await companionIcons(join(root,"assets/icon.svg"),resources,iconSet);
+  await companionIcons(join(root,"assets/jase-logo.png"),resources,iconSet);
   for (const name of ["LICENSE", "NOTICE"]) writeFileSync(join(resources, `${name}.txt`), readFileSync(join(root, name)));
   run("/usr/bin/iconutil",["-c","icns",iconSet,"-o",join(resources,"Jase.icns")]);
   writeFileSync(join(contents, "Info.plist"), `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleExecutable</key><string>Jase Tunnel</string><key>CFBundleIdentifier</key><string>io.github.strnozz.jase-tunnel</string><key>CFBundleName</key><string>Jase Tunnel</string><key>CFBundleDisplayName</key><string>Jase Tunnel</string><key>CFBundleIconFile</key><string>Jase.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundleVersion</key><string>${version}</string><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict><key>NSLocalNetworkUsageDescription</key><string>Connect local models to websites you approve.</string></dict></plist>`);

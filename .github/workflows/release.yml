@@ -58,9 +58,11 @@ jobs:
           fi
           mkdir -p .deploy-check
           node --input-type=module <<'JS'
-          import { writeFileSync } from 'node:fs';
+          import { existsSync, readFileSync, writeFileSync } from 'node:fs';
           const development=process.env.JASE_TUNNEL_RELEASE_TAG.startsWith('dev-');
-          writeFileSync('.deploy-check/release-notes.md', `Jase Tunnel for Windows, macOS and Linux.\n\n${development ? 'Development build: also accepts localhost websites.' : 'Stable-channel build for public HTTPS websites.'}\n\nSafari connection support: with website SDK 0.5.2 or later, Connect my model opens a local window for discovery and pairing. Confirm the domain and model in the app as usual. No certificate installation or browser security exception is required.\n\nEnglish native interfaces, notifications, activity logs and bundled instructions.\n\nCommit: ${process.env.JASE_TUNNEL_RELEASE_COMMIT}\nBuild: ${process.env.JASE_TUNNEL_RELEASE_RUN_URL}\n\nSHA256SUMS contains the executable checksums. The packages are ready for owner review; publish this draft to make them available to website panels.\n`);
+          const version=readFileSync('VERSION','utf8').trim(), notesPath=`docs/releases/v${version}.md`;
+          const notes=existsSync(notesPath) ? '\n'+readFileSync(notesPath,'utf8') : '';
+          writeFileSync('.deploy-check/release-notes.md', `Jase Tunnel for Windows, macOS and Linux.\n\n${development ? 'Development build: also accepts localhost websites.' : 'Stable-channel build for public HTTPS websites.'}\n\nCommit: ${process.env.JASE_TUNNEL_RELEASE_COMMIT}\nBuild: ${process.env.JASE_TUNNEL_RELEASE_RUN_URL}\n\nSHA256SUMS contains the executable checksums. The packages are ready for owner review; publish this draft to make them available to website panels.\n`+notes);
           JS
           if [ "$draft" != true ]; then
             gh release create "$JASE_TUNNEL_RELEASE_TAG" --verify-tag --target "$JASE_TUNNEL_RELEASE_COMMIT" --draft --title "Jase Tunnel $JASE_TUNNEL_RELEASE_TAG" --notes-file .deploy-check/release-notes.md
